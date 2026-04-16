@@ -6,11 +6,12 @@ import { ESTADO_OP_COR, ESTADO_OP_LABEL, PRIORIDADE_OP_COR, ZONA_LABEL } from "@
 import type { Funcionario, OrdemProducao, ZonaProducao } from "@/lib/types";
 
 /* ============================================================
-   Linha badge para zonas combinadas (Manual / Termoformadora)
+   Badges de tipo de linha (Assembling / Termoformadora / Stock)
    ============================================================ */
-const LINHA_BADGE: Record<string, { label: string; cor: string }> = {
-  sl2_manual: { label: "Manual", cor: "bg-amber-100 text-amber-700 border-amber-200" },
-  sl2_termo: { label: "Termo", cor: "bg-violet-100 text-violet-700 border-violet-200" },
+const TIPO_BADGE: Record<string, { label: string; cor: string }> = {
+  assembling: { label: "Assembling", cor: "bg-amber-100 text-amber-700 border-amber-200" },
+  termoformadora: { label: "Termo", cor: "bg-violet-100 text-violet-700 border-violet-200" },
+  stock: { label: "Stock", cor: "bg-cyan-100 text-cyan-700 border-cyan-200" },
 };
 
 /* ============================================================
@@ -93,28 +94,21 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
             {ativas.length} OP{ativas.length === 1 ? "" : "s"}
           </span>
         </div>
-        {onOpenOP && (
-          <button
-            onClick={() => onOpenOP(null, zona.id)}
-            className="rounded-md bg-white px-2 py-0.5 text-xs font-bold text-slate-600 shadow-sm ring-1 ring-slate-200 transition-colors hover:bg-slate-100"
-            title="Nova OP"
-          >
-            + OP
-          </button>
-        )}
       </div>
 
-      <div className="flex-1 flex flex-col gap-2 overflow-hidden p-2">
+      <div className="flex-1 grid grid-rows-4 gap-2 overflow-hidden p-2">
         {(() => {
-          // Máximo 4 OPs visíveis — em_curso primeiro, depois restantes
+          const MAX = 4;
           const visiveis: OrdemProducao[] = [];
-          emCurso.forEach((op) => { if (visiveis.length < 4) visiveis.push(op); });
-          ativas.filter((o) => o.estado !== "em_curso").forEach((op) => { if (visiveis.length < 4) visiveis.push(op); });
+          emCurso.forEach((op) => { if (visiveis.length < MAX) visiveis.push(op); });
+          ativas.filter((o) => o.estado !== "em_curso").forEach((op) => { if (visiveis.length < MAX) visiveis.push(op); });
           const restantes = ativas.length - visiveis.length;
 
-          return visiveis.length > 0 ? (
-            <>
-              {visiveis.map((op) => (
+          // Sempre 4 slots — preenchidos com OPs ou vazios
+          return Array.from({ length: MAX }, (_, i) => {
+            const op = visiveis[i];
+            if (op) {
+              return (
                 <OPRow
                   key={op.id}
                   op={op}
@@ -122,18 +116,19 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
                   onClick={onOpenOP ? () => onOpenOP(op, op.zona_id) : undefined}
                   showLinha={showLinhaBadge}
                 />
-              ))}
-              {restantes > 0 && (
-                <div className="text-center text-[10px] font-bold text-slate-400">
+              );
+            }
+            if (i === visiveis.length && restantes > 0) {
+              return (
+                <div key={`rest-${i}`} className="flex items-center justify-center rounded-xl border border-dashed border-slate-200 text-xs font-bold text-slate-400">
                   +{restantes} OP{restantes > 1 ? "s" : ""}
                 </div>
-              )}
-            </>
-          ) : (
-            <div className="flex-1 flex items-center justify-center rounded-lg border border-dashed border-slate-200 text-xs font-bold text-slate-400">
-              Sem OP em curso
-            </div>
-          );
+              );
+            }
+            return (
+              <div key={`empty-${i}`} className="rounded-xl border border-dashed border-slate-100" />
+            );
+          });
         })()}
       </div>
 
@@ -177,7 +172,7 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
 function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; principal?: boolean; onClick?: () => void; showLinha?: boolean }) {
   const pct = op.quantidade_alvo > 0 ? Math.min(100, (op.quantidade_atual / op.quantidade_alvo) * 100) : 0;
   const restante = minutesUntil(op.fim_previsto);
-  const linhaBadge = showLinha ? LINHA_BADGE[op.zona_id] : undefined;
+  const tipoBadge = showLinha && op.tipo_linha ? TIPO_BADGE[op.tipo_linha] : undefined;
 
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData("application/op-id", op.id);
@@ -195,7 +190,7 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
       onDragStart={handleDragStart}
       onClick={onClick}
       className={cn(
-        "flex-1 rounded-xl border p-3 transition-all select-none",
+        "flex flex-1 flex-col rounded-xl border p-3 transition-all select-none",
         principal ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white",
         "cursor-grab active:cursor-grabbing active:opacity-60 active:scale-[0.97]",
         onClick && "hover:shadow-md"
@@ -203,41 +198,41 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {op.produto_codigo && (
               <span className="shrink-0 rounded-md bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] font-extrabold text-white">
                 {op.produto_codigo}
               </span>
             )}
-            {linhaBadge && (
-              <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-[11px] font-extrabold", linhaBadge.cor)}>
-                {linhaBadge.label}
+            {tipoBadge && (
+              <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-[11px] font-extrabold", tipoBadge.cor)}>
+                {tipoBadge.label}
               </span>
             )}
-            <p className={cn("truncate font-extrabold text-slate-900", principal ? "text-sm" : "text-xs")}>
-              {op.produto_nome}
-            </p>
+            <div className="flex shrink-0 items-center gap-1">
+              <span className={cn("rounded-md border px-1.5 py-0.5 text-[11px] font-bold", ESTADO_OP_COR[op.estado])}>
+                {ESTADO_OP_LABEL[op.estado]}
+              </span>
+              {op.prioridade !== "normal" && (
+                <span className={cn("rounded-md border px-1.5 py-0.5 text-[11px] font-bold capitalize", PRIORIDADE_OP_COR[op.prioridade])}>
+                  {op.prioridade}
+                </span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
+          <p className={cn("mt-1 truncate font-extrabold text-slate-900", principal ? "text-base" : "text-sm")}>
+            {op.produto_nome}
+          </p>
+          <div className="mt-0.5 flex items-center gap-2 text-sm font-bold text-slate-500">
             {op.numero && <span>OP {op.numero}</span>}
             {op.cliente && <span className="truncate">· {op.cliente}</span>}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <span className={cn("rounded-md border px-1.5 py-0.5 text-[11px] font-bold", ESTADO_OP_COR[op.estado])}>
-            {ESTADO_OP_LABEL[op.estado]}
-          </span>
-          {op.prioridade !== "normal" && (
-            <span className={cn("rounded-md border px-1.5 py-0.5 text-[11px] font-bold capitalize", PRIORIDADE_OP_COR[op.prioridade])}>
-              {op.prioridade}
-            </span>
-          )}
-        </div>
       </div>
 
       {op.quantidade_alvo > 0 && (
-        <div className="mt-2">
-          <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
+        <div className="mt-auto pt-1">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-600">
             <span>{op.quantidade_atual} / {op.quantidade_alvo}</span>
             {restante !== null && (
               <span suppressHydrationWarning className={cn(restante < 0 ? "text-red-600" : "text-slate-500")}>
@@ -245,7 +240,7 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
               </span>
             )}
           </div>
-          <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
+          <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-200">
             <div
               suppressHydrationWarning
               className={cn("h-full rounded-full transition-all", principal ? "bg-emerald-500" : "bg-slate-400")}

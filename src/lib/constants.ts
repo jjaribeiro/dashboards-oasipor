@@ -66,9 +66,10 @@ export const RESPONSAVEIS = ["Joana Romão", "Ana Leal"] as const;
 export const ZONA_LABEL: Record<string, string> = {
   sl1: "Sala Limpa 1",
   sl2_picking: "SL2 — Picking",
-  sl2_manual: "SL2 — Linha Manual",
+  sl2_manual: "SL2 — Assembling",
   sl2_termo: "SL2 — Termoformadora",
   embalamento: "Embalamento",
+  stock: "Stock",
   pre_cond_1: "Pré-Condicionamento 1",
   pre_cond_2: "Pré-Condicionamento 2",
   esterilizador: "Esterilizador",
@@ -149,12 +150,33 @@ export const DURACAO_DEFAULT_MIN: Record<string, number> = {
 export const ZONAS_ORDEM: Array<{ id: string; nome: string; area: string }> = [
   { id: "sl1", nome: "Sala Limpa 1", area: "sala_limpa_1" },
   { id: "sl2_picking", nome: "SL2 — Picking", area: "sala_limpa_2" },
-  { id: "sl2_manual", nome: "SL2 — Linha Manual", area: "sala_limpa_2" },
+  { id: "sl2_manual", nome: "SL2 — Assembling", area: "sala_limpa_2" },
   { id: "sl2_termo", nome: "SL2 — Termoformadora", area: "sala_limpa_2" },
   { id: "embalamento", nome: "Embalamento", area: "embalamento" },
+  { id: "stock", nome: "Stock", area: "embalamento" },
   { id: "pre_cond_1", nome: "Pré-Condicionamento 1", area: "esterilizacao" },
   { id: "pre_cond_2", nome: "Pré-Condicionamento 2", area: "esterilizacao" },
   { id: "esterilizador", nome: "Esterilizador", area: "esterilizacao" },
   { id: "arejamento_1", nome: "Arejamento 1", area: "esterilizacao" },
   { id: "arejamento_2", nome: "Arejamento 2", area: "esterilizacao" },
+];
+
+/** Zonas disponíveis no form de OPs (sem esterilização) */
+export const ZONAS_OP: Array<{ id: string; nome: string }> = [
+  { id: "sl1", nome: "Sala Limpa 1" },
+  { id: "sl2_picking", nome: "SL2 — Picking" },
+  { id: "sl2_linhas", nome: "SL2 — Linhas" },
+  { id: "embalamento", nome: "Embalamento" },
+];
+
+export const TIPO_LINHA_LABEL: Record<string, string> = {
+  assembling: "Assembling",
+  termoformadora: "Termoformadora",
+  stock: "Stock",
+};
+
+export const TIPO_LINHA_OPTIONS: Array<{ id: string; nome: string }> = [
+  { id: "assembling", nome: "Assembling" },
+  { id: "termoformadora", nome: "Termoformadora" },
+  { id: "stock", nome: "Stock" },
 ];

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { cn, cycleProgress, formatDuration, minutesUntil } from "@/lib/utils";
 import { ESTADO_CICLO_COR, ESTADO_CICLO_LABEL, ZONA_LABEL } from "@/lib/constants";
 import { useNow } from "@/hooks/use-now";
@@ -9,10 +10,11 @@ interface CardCicloProps {
   zona: ZonaProducao;
   ciclo?: EquipamentoCiclo;
   onOpenCiclo?: (ciclo: EquipamentoCiclo | null, zonaId: string) => void;
+  onMoveCiclo?: (cicloId: string, novaZonaId: string) => void;
   kiosk?: boolean;
 }
 
-export function CardCiclo({ zona, ciclo, onOpenCiclo, kiosk }: CardCicloProps) {
+export function CardCiclo({ zona, ciclo, onOpenCiclo, onMoveCiclo, kiosk }: CardCicloProps) {
   useNow(30_000); // re-render a cada 30s
   const estado = ciclo?.estado ?? "vazio";
   const progress = ciclo ? cycleProgress(ciclo.inicio, ciclo.fim_previsto) : 0;
@@ -20,12 +22,54 @@ export function CardCiclo({ zona, ciclo, onOpenCiclo, kiosk }: CardCicloProps) {
   const atraso = restante !== null && restante < 0;
   const isEster = zona.tipo === "esterilizador";
 
+  // Drag & drop
+  const dragCounter = useRef(0);
+  const [dragOver, setDragOver] = useState(false);
+
+  function handleDragEnter(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current++;
+    setDragOver(true);
+  }
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }
+  function handleDragLeave() {
+    dragCounter.current--;
+    if (dragCounter.current <= 0) { dragCounter.current = 0; setDragOver(false); }
+  }
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDragOver(false);
+    const cicloId = e.dataTransfer.getData("application/ciclo-id");
+    const fromZona = e.dataTransfer.getData("application/ciclo-from-zona");
+    if (cicloId && fromZona !== zona.id && onMoveCiclo) {
+      onMoveCiclo(cicloId, zona.id);
+    }
+  }
+  function handleDragStart(e: React.DragEvent) {
+    if (!ciclo) { e.preventDefault(); return; }
+    e.dataTransfer.setData("application/ciclo-id", ciclo.id);
+    e.dataTransfer.setData("application/ciclo-from-zona", zona.id);
+    e.dataTransfer.effectAllowed = "move";
+  }
+
   return (
     <div
+      draggable={!!ciclo}
+      onDragStart={handleDragStart}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       onClick={onOpenCiclo ? () => onOpenCiclo(ciclo ?? null, zona.id) : undefined}
       className={cn(
         "flex h-full flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition-all",
-        onOpenCiclo && "cursor-pointer hover:shadow-md",
+        dragOver ? "border-blue-400 ring-2 ring-blue-200 bg-blue-50/30" : "",
+        ciclo && "cursor-grab active:cursor-grabbing active:opacity-60",
+        onOpenCiclo && "hover:shadow-md",
         estado === "alarme" && "border-red-300 ring-2 ring-red-200",
         estado === "em_ciclo" && "border-emerald-200",
         estado === "concluido" && "border-blue-200",
@@ -51,11 +95,6 @@ export function CardCiclo({ zona, ciclo, onOpenCiclo, kiosk }: CardCicloProps) {
           <PaletesMiniGrid paletes={ciclo.paletes_detalhe} capacidade={isEster ? 8 : undefined} />
         )}
 
-        {isEster && (!ciclo?.paletes_detalhe || ciclo.paletes_detalhe.length === 0) && (
-          <div className="text-xs font-bold text-slate-600">
-            Paletes: <span className="text-slate-900">{ciclo?.paletes ?? 0}</span> / 8
-          </div>
-        )}
 
         {estado === "em_ciclo" && ciclo?.inicio && ciclo?.fim_previsto && (
           <div>

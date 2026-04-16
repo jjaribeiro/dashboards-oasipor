@@ -81,6 +81,12 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
     else toast.success("OP movida");
   }, []);
 
+  const moveCiclo = useCallback(async (cicloId: string, novaZonaId: string) => {
+    const { error } = await supabase.from("equipamento_ciclo").update({ zona_id: novaZonaId }).eq("id", cicloId);
+    if (error) toast.error("Erro ao mover ciclo");
+    else toast.success("Ciclo movido");
+  }, []);
+
   return (
     <div className={cn("flex h-full flex-col", kiosk && "kiosk")}>
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 shadow-sm">
@@ -105,12 +111,20 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
       </header>
 
       <div className="flex flex-1 min-h-0 flex-col gap-2 overflow-hidden p-3">
-        {/* Produção: 4 colunas — SL1 | SL2 Picking | SL2 Linhas (Manual+Termo) | Embalamento */}
+        {/* Produção: 4 colunas — SL1 | SL2 Picking | SL2 Linhas (Assembling+Termo) | Embalamento */}
         <div className="flex min-h-0 flex-[3] flex-col">
-          <div className="mb-1 flex items-center gap-2">
-            {porArea.sala_limpa_1 && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.sala_limpa_1)}>{AREA_LABEL.sala_limpa_1}</span>}
-            {porArea.sala_limpa_2 && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.sala_limpa_2)}>{AREA_LABEL.sala_limpa_2}</span>}
-            {porArea.embalamento && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.embalamento)}>{AREA_LABEL.embalamento}</span>}
+          <div className="mb-1 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {porArea.sala_limpa_1 && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.sala_limpa_1)}>{AREA_LABEL.sala_limpa_1}</span>}
+              {porArea.sala_limpa_2 && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.sala_limpa_2)}>{AREA_LABEL.sala_limpa_2}</span>}
+              {porArea.embalamento && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.embalamento)}>{AREA_LABEL.embalamento}</span>}
+            </div>
+            <button
+              onClick={() => openOP(null, "")}
+              className="rounded-md bg-slate-900 px-3 py-1 text-xs font-bold text-white shadow-sm transition-colors hover:bg-slate-700"
+            >
+              + Adicionar OP
+            </button>
           </div>
           <div className="grid min-h-0 flex-1 grid-cols-4 gap-2">
             {/* SL1 */}
@@ -180,8 +194,14 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
         {/* Esterilização: 5 câmaras — mais curto */}
         {porArea.esterilizacao && (
           <div className="flex min-h-0 flex-[1] flex-col">
-            <div className="mb-1">
+            <div className="mb-1 flex items-center justify-between">
               <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.esterilizacao)}>{AREA_LABEL.esterilizacao}</span>
+              <button
+                onClick={() => openCiclo(null, porArea.esterilizacao![0].id)}
+                className="rounded-md bg-slate-900 px-3 py-1 text-xs font-bold text-white shadow-sm transition-colors hover:bg-slate-700"
+              >
+                + Carregar Ciclo
+              </button>
             </div>
             <div className="grid min-h-0 flex-1 grid-cols-5 gap-2">
               {porArea.esterilizacao.map((z) => (
@@ -190,6 +210,7 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
                   zona={z}
                   ciclo={cicloPorZona[z.id]}
                   onOpenCiclo={openCiclo}
+                  onMoveCiclo={moveCiclo}
                   kiosk={kiosk}
                 />
               ))}
@@ -221,6 +242,7 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
           onOpenChange={(o) => setEquipaForm((s) => ({ ...s, open: o }))}
           zonaId={equipaForm.zona}
           funcionarios={funcionarios}
+          responsavel={zonas.find((z) => z.id === equipaForm.zona)?.responsavel}
         />
       )}
     </div>

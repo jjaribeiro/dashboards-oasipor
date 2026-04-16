@@ -107,6 +107,7 @@ export type ZonaId =
   | "sl2_manual"
   | "sl2_termo"
   | "embalamento"
+  | "stock"
   | "pre_cond_1"
   | "pre_cond_2"
   | "esterilizador"
@@ -162,6 +163,7 @@ export interface Funcionario {
 
 export type EstadoOP = "planeada" | "em_curso" | "pausada" | "concluida" | "cancelada";
 export type PrioridadeOP = "baixa" | "normal" | "alta" | "urgente";
+export type TipoLinha = "assembling" | "termoformadora" | "stock" | null;
 
 export interface OrdemProducao {
   id: string;
@@ -175,7 +177,9 @@ export interface OrdemProducao {
   quantidade_atual: number;
   estado: EstadoOP;
   prioridade: PrioridadeOP;
+  tipo_linha: TipoLinha;
   inicio: string | null;
+  inicio_previsto: string | null;
   fim_previsto: string | null;
   fim_real: string | null;
   responsavel: string | null;
@@ -186,12 +190,21 @@ export interface OrdemProducao {
 
 export type EstadoCiclo = "vazio" | "em_ciclo" | "concluido" | "alarme";
 
+export interface ArtigoPalete {
+  referencia: string;
+  op_numero?: string | null;
+  quantidade?: number | null;
+  cliente?: string | null;
+}
+
 export interface PaleteDetalhe {
   posicao: number;
   conteudo: string;
   op_numero?: string | null;
   quantidade?: number | null;
   cliente?: string | null;
+  /** Múltiplos artigos na mesma palete */
+  artigos?: ArtigoPalete[] | null;
 }
 
 export interface EquipamentoCiclo {

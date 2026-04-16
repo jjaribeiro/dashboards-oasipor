@@ -11,7 +11,7 @@ import { supabase } from "@/lib/supabase/client";
 import { DURACAO_DEFAULT_MIN, ZONA_LABEL } from "@/lib/constants";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import type { EquipamentoCiclo, PaleteDetalhe } from "@/lib/types";
+import type { ArtigoPalete, EquipamentoCiclo, PaleteDetalhe } from "@/lib/types";
 
 interface FormCicloProps {
   open: boolean;
@@ -21,26 +21,44 @@ interface FormCicloProps {
   isEsterilizador?: boolean;
 }
 
-type PaleteEditavel = {
-  posicao: number;
-  conteudo: string;
+type ArtigoEditavel = {
+  referencia: string;
   op_numero: string;
   quantidade: string;
   cliente: string;
 };
+
+type PaleteEditavel = {
+  posicao: number;
+  artigos: ArtigoEditavel[];
+};
+
+const EMPTY_ARTIGO: ArtigoEditavel = { referencia: "", op_numero: "", quantidade: "", cliente: "" };
 
 function initPaletes(item: EquipamentoCiclo | null | undefined, capacidade: number): PaleteEditavel[] {
   const existentes = new Map<number, PaleteDetalhe>();
   (item?.paletes_detalhe ?? []).forEach((p) => existentes.set(p.posicao, p));
   return Array.from({ length: capacidade }, (_, i) => {
     const p = existentes.get(i + 1);
-    return {
-      posicao: i + 1,
-      conteudo: p?.conteudo ?? "",
-      op_numero: p?.op_numero ?? "",
-      quantidade: p?.quantidade != null ? String(p.quantidade) : "",
-      cliente: p?.cliente ?? "",
-    };
+    // Migrar formato antigo (conteudo único) para multi-artigo
+    const artigos: ArtigoEditavel[] = [];
+    if (p?.artigos && p.artigos.length > 0) {
+      p.artigos.forEach((a) => artigos.push({
+        referencia: a.referencia ?? "",
+        op_numero: a.op_numero ?? "",
+        quantidade: a.quantidade != null ? String(a.quantidade) : "",
+        cliente: a.cliente ?? "",
+      }));
+    } else if (p?.conteudo) {
+      artigos.push({
+        referencia: p.conteudo,
+        op_numero: p.op_numero ?? "",
+        quantidade: p.quantidade != null ? String(p.quantidade) : "",
+        cliente: p.cliente ?? "",
+      });
+    }
+    if (artigos.length === 0) artigos.push({ ...EMPTY_ARTIGO });
+    return { posicao: i + 1, artigos };
   });
 }
 
@@ -50,13 +68,32 @@ export function FormCiclo({ open, onOpenChange, editItem, zonaId, isEsterilizado
   const capacidade = isEsterilizador ? 8 : Math.max(editItem?.paletes_detalhe?.length ?? 8, 8);
   const [paletes, setPaletes] = useState<PaleteEditavel[]>(() => initPaletes(editItem, capacidade));
 
-  function updatePalete(i: number, patch: Partial<PaleteEditavel>) {
-    setPaletes((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+  function updateArtigo(paleteIdx: number, artigoIdx: number, patch: Partial<ArtigoEditavel>) {
+    setPaletes((prev) => prev.map((p, pi) => {
+      if (pi !== paleteIdx) return p;
+      const artigos = p.artigos.map((a, ai) => (ai === artigoIdx ? { ...a, ...patch } : a));
+      return { ...p, artigos };
+    }));
+  }
+
+  function addArtigo(paleteIdx: number) {
+    setPaletes((prev) => prev.map((p, pi) => {
+      if (pi !== paleteIdx) return p;
+      return { ...p, artigos: [...p.artigos, { ...EMPTY_ARTIGO }] };
+    }));
+  }
+
+  function removeArtigo(paleteIdx: number, artigoIdx: number) {
+    setPaletes((prev) => prev.map((p, pi) => {
+      if (pi !== paleteIdx) return p;
+      const artigos = p.artigos.filter((_, ai) => ai !== artigoIdx);
+      return { ...p, artigos: artigos.length > 0 ? artigos : [{ ...EMPTY_ARTIGO }] };
+    }));
   }
 
   function limparPalete(i: number) {
     setPaletes((prev) =>
-      prev.map((p, idx) => (idx === i ? { ...p, conteudo: "", op_numero: "", quantidade: "", cliente: "" } : p))
+      prev.map((p, idx) => (idx === i ? { ...p, artigos: [{ ...EMPTY_ARTIGO }] } : p))
     );
   }
 
@@ -70,14 +107,25 @@ export function FormCiclo({ open, onOpenChange, editItem, zonaId, isEsterilizado
     const agora = new Date();
 
     const paletesDetalhe: PaleteDetalhe[] = paletes
-      .filter((p) => p.conteudo.trim().length > 0)
-      .map((p) => ({
-        posicao: p.posicao,
-        conteudo: p.conteudo.trim(),
-        op_numero: p.op_numero.trim() || null,
-        quantidade: p.quantidade.trim() ? Number(p.quantidade) : null,
-        cliente: p.cliente.trim() || null,
-      }));
+      .filter((p) => p.artigos.some((a) => a.referencia.trim().length > 0))
+      .map((p) => {
+        const artigos: ArtigoPalete[] = p.artigos
+          .filter((a) => a.referencia.trim().length > 0)
+          .map((a) => ({
+            referencia: a.referencia.trim(),
+            op_numero: a.op_numero.trim() || null,
+            quantidade: a.quantidade.trim() ? Number(a.quantidade) : null,
+            cliente: a.cliente.trim() || null,
+          }));
+        return {
+          posicao: p.posicao,
+          conteudo: artigos.map((a) => a.referencia).join(", "),
+          op_numero: artigos[0]?.op_numero ?? null,
+          quantidade: artigos.reduce((s, a) => s + (a.quantidade ?? 0), 0) || null,
+          cliente: artigos[0]?.cliente ?? null,
+          artigos,
+        };
+      });
 
     const data: Record<string, unknown> = {
       zona_id: zonaId,
@@ -120,6 +168,17 @@ export function FormCiclo({ open, onOpenChange, editItem, zonaId, isEsterilizado
     onOpenChange(false);
   }
 
+  async function apagar() {
+    if (!editItem) return;
+    if (!confirm("Tem a certeza que quer apagar este ciclo?")) return;
+    const { error } = await supabase.from("equipamento_ciclo").delete().eq("id", editItem.id);
+    if (error) toast.error("Erro ao apagar ciclo");
+    else {
+      toast.success("Ciclo apagado");
+      onOpenChange(false);
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-slate-200 bg-white text-slate-900 sm:max-w-2xl">
@@ -149,12 +208,12 @@ export function FormCiclo({ open, onOpenChange, editItem, zonaId, isEsterilizado
           {/* Paletes */}
           <div>
             <div className="flex items-center justify-between">
-              <Label>Paletes ({paletes.filter((p) => p.conteudo.trim()).length}/{capacidade})</Label>
+              <Label>Paletes ({paletes.filter((p) => p.artigos.some((a) => a.referencia.trim())).length}/{capacidade})</Label>
               <span className="text-[10px] font-bold text-slate-400">Deixar vazio = palete livre</span>
             </div>
             <div className="mt-2 grid grid-cols-2 gap-2">
-              {paletes.map((p, i) => {
-                const preenchida = p.conteudo.trim().length > 0;
+              {paletes.map((p, pi) => {
+                const preenchida = p.artigos.some((a) => a.referencia.trim().length > 0);
                 return (
                   <div
                     key={p.posicao}
@@ -170,46 +229,71 @@ export function FormCiclo({ open, onOpenChange, editItem, zonaId, isEsterilizado
                       )}>
                         P{p.posicao}
                       </span>
-                      {preenchida && (
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => limparPalete(i)}
-                          className="text-[10px] font-bold text-slate-500 hover:text-red-600"
+                          onClick={() => addArtigo(pi)}
+                          className="text-[10px] font-bold text-blue-600 hover:text-blue-800"
                         >
-                          limpar
+                          + artigo
                         </button>
-                      )}
+                        {preenchida && (
+                          <button
+                            type="button"
+                            onClick={() => limparPalete(pi)}
+                            className="text-[10px] font-bold text-slate-500 hover:text-red-600"
+                          >
+                            limpar
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <input
-                      type="text"
-                      value={p.conteudo}
-                      onChange={(e) => updatePalete(i, { conteudo: e.target.value })}
-                      placeholder="Conteúdo / ref"
-                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-900 placeholder:text-slate-400"
-                    />
-                    <div className="mt-1 grid grid-cols-2 gap-1">
-                      <input
-                        type="text"
-                        value={p.op_numero}
-                        onChange={(e) => updatePalete(i, { op_numero: e.target.value })}
-                        placeholder="OP"
-                        className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-900 placeholder:text-slate-400"
-                      />
-                      <input
-                        type="number"
-                        value={p.quantidade}
-                        onChange={(e) => updatePalete(i, { quantidade: e.target.value })}
-                        placeholder="Qtd"
-                        className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-900 placeholder:text-slate-400"
-                      />
-                    </div>
-                    <input
-                      type="text"
-                      value={p.cliente}
-                      onChange={(e) => updatePalete(i, { cliente: e.target.value })}
-                      placeholder="Cliente"
-                      className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-900 placeholder:text-slate-400"
-                    />
+                    {p.artigos.map((a, ai) => (
+                      <div key={ai} className={cn("mt-1", ai > 0 && "border-t border-slate-200 pt-1")}>
+                        {p.artigos.length > 1 && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-bold text-slate-400">Artigo {ai + 1}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeArtigo(pi, ai)}
+                              className="text-[9px] font-bold text-red-400 hover:text-red-600"
+                            >
+                              remover
+                            </button>
+                          </div>
+                        )}
+                        <input
+                          type="text"
+                          value={a.referencia}
+                          onChange={(e) => updateArtigo(pi, ai, { referencia: e.target.value })}
+                          placeholder="Ref / conteúdo"
+                          className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-900 placeholder:text-slate-400"
+                        />
+                        <div className="mt-1 grid grid-cols-2 gap-1">
+                          <input
+                            type="text"
+                            value={a.op_numero}
+                            onChange={(e) => updateArtigo(pi, ai, { op_numero: e.target.value })}
+                            placeholder="OP"
+                            className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-900 placeholder:text-slate-400"
+                          />
+                          <input
+                            type="number"
+                            value={a.quantidade}
+                            onChange={(e) => updateArtigo(pi, ai, { quantidade: e.target.value })}
+                            placeholder="Qtd"
+                            className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-900 placeholder:text-slate-400"
+                          />
+                        </div>
+                        <input
+                          type="text"
+                          value={a.cliente}
+                          onChange={(e) => updateArtigo(pi, ai, { cliente: e.target.value })}
+                          placeholder="Cliente"
+                          className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-900 placeholder:text-slate-400"
+                        />
+                      </div>
+                    ))}
                   </div>
                 );
               })}
@@ -233,9 +317,16 @@ export function FormCiclo({ open, onOpenChange, editItem, zonaId, isEsterilizado
             <Label htmlFor="notas">Notas</Label>
             <Textarea id="notas" name="notas" rows={2} defaultValue={editItem?.notas ?? ""} className="mt-1" />
           </div>
-          <Button type="submit" disabled={loading} className="mt-2">
-            {loading ? "A guardar..." : "Guardar"}
-          </Button>
+          <div className="mt-2 flex gap-2">
+            <Button type="submit" disabled={loading} className="flex-1">
+              {loading ? "A guardar..." : "Guardar"}
+            </Button>
+            {editItem && (
+              <Button type="button" variant="secondary" onClick={apagar} className="bg-red-100 text-red-700 hover:bg-red-200">
+                Apagar
+              </Button>
+            )}
+          </div>
         </form>
       </DialogContent>
     </Dialog>
