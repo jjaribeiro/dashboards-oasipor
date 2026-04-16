@@ -41,7 +41,7 @@ export function useRealtimeTable<T extends { id: string }>(
       )
       .subscribe();
 
-    const interval = setInterval(refetch, 60_000);
+    const interval = setInterval(refetch, 15_000);
     return () => {
       supabase.removeChannel(channel);
       clearInterval(interval);

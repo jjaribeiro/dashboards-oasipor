@@ -222,18 +222,18 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
               )}
             </div>
           </div>
-          <p className={cn("mt-1 truncate font-extrabold text-slate-900", principal ? "text-base" : "text-sm")}>
+          <p className={cn("mt-1 line-clamp-2 font-extrabold leading-tight text-slate-900", principal ? "text-base" : "text-sm")}>
             {op.produto_nome}
           </p>
           <div className="mt-0.5 flex items-center gap-2 text-sm font-bold text-slate-500">
-            {op.numero && <span>OP {op.numero}</span>}
+            {op.numero && <span className="shrink-0">OP {op.numero}</span>}
             {op.cliente && <span className="truncate">· {op.cliente}</span>}
           </div>
         </div>
       </div>
 
       {op.quantidade_alvo > 0 && (
-        <div className="mt-auto pt-1">
+        <div className="mt-2">
           <div className="flex items-center justify-between text-xs font-bold text-slate-600">
             <span>{op.quantidade_atual} / {op.quantidade_alvo}</span>
             {restante !== null && (
