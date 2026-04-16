@@ -90,7 +90,9 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
   }, []);
 
   return (
-    <div className={cn("flex h-dvh flex-col overflow-hidden", kiosk && "kiosk")}>
+    <div
+      className={cn("fixed inset-0 flex flex-col overflow-hidden", kiosk && "kiosk")}
+    >
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 shadow-sm">
         <div className="flex items-center gap-4">
           <a href="/" className="flex items-center gap-2 text-slate-500 transition-colors hover:text-slate-900" title="Voltar ao hub">

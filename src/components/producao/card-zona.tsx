@@ -202,7 +202,7 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             {op.produto_codigo && (
-              <span className="shrink-0 rounded-md bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] font-extrabold text-white">
+              <span className="shrink-0 rounded-md bg-slate-900 px-2 py-0.5 font-mono text-sm font-extrabold text-white">
                 {op.produto_codigo}
               </span>
             )}
