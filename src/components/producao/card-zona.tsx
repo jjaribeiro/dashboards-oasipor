@@ -98,7 +98,7 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
         </div>
       </div>
 
-      <div className="flex-1 grid grid-rows-4 gap-2 overflow-hidden p-2">
+      <div className="flex flex-1 flex-col gap-1.5 overflow-hidden p-2">
         {(() => {
           const MAX = 4;
           const visiveis: OrdemProducao[] = [];
@@ -106,31 +106,33 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
           ativas.filter((o) => o.estado !== "em_curso").forEach((op) => { if (visiveis.length < MAX) visiveis.push(op); });
           const restantes = ativas.length - visiveis.length;
 
-          // Sempre 4 slots — preenchidos com OPs ou vazios
-          return Array.from({ length: MAX }, (_, i) => {
-            const op = visiveis[i];
-            if (op) {
-              return (
-                <OPRow
-                  key={op.id}
-                  op={op}
-                  principal={op.estado === "em_curso"}
-                  onClick={onOpenOP ? () => onOpenOP(op, op.zona_id) : undefined}
-                  showLinha={showLinhaBadge}
-                />
-              );
-            }
-            if (i === visiveis.length && restantes > 0) {
-              return (
-                <div key={`rest-${i}`} className="flex items-center justify-center rounded-xl border border-dashed border-slate-200 text-xs font-bold text-slate-400">
-                  +{restantes} OP{restantes > 1 ? "s" : ""}
-                </div>
-              );
-            }
-            return (
-              <div key={`empty-${i}`} className="rounded-xl border border-dashed border-slate-100" />
+          const items: React.ReactNode[] = visiveis.map((op) => (
+            <OPRow
+              key={op.id}
+              op={op}
+              principal={op.estado === "em_curso"}
+              onClick={onOpenOP ? () => onOpenOP(op, op.zona_id) : undefined}
+              showLinha={showLinhaBadge}
+            />
+          ));
+
+          if (restantes > 0) {
+            items.push(
+              <div key="rest" className="flex items-center justify-center rounded-xl border border-dashed border-slate-200 py-2 text-xs font-bold text-slate-400">
+                +{restantes} OP{restantes > 1 ? "s" : ""}
+              </div>
             );
-          });
+          }
+
+          if (items.length === 0) {
+            items.push(
+              <div key="empty" className="flex flex-1 items-center justify-center text-xs font-bold text-slate-300">
+                Sem OPs ativas
+              </div>
+            );
+          }
+
+          return items;
         })()}
       </div>
 
@@ -192,7 +194,7 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
       onDragStart={handleDragStart}
       onClick={onClick}
       className={cn(
-        "flex flex-1 flex-col rounded-xl border p-3 transition-all select-none",
+        "flex flex-col rounded-xl border p-2.5 transition-all select-none",
         principal ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white",
         "cursor-grab active:cursor-grabbing active:opacity-60 active:scale-[0.97]",
         onClick && "hover:shadow-md"
