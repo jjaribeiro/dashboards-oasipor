@@ -170,13 +170,13 @@ export const ZONAS_OP: Array<{ id: string; nome: string }> = [
 ];
 
 export const TIPO_LINHA_LABEL: Record<string, string> = {
-  assembling: "Assembling",
+  manual: "Manual",
   termoformadora: "Termoformadora",
   stock: "Stock",
 };
 
 export const TIPO_LINHA_OPTIONS: Array<{ id: string; nome: string }> = [
-  { id: "assembling", nome: "Assembling" },
+  { id: "manual", nome: "Manual" },
   { id: "termoformadora", nome: "Termoformadora" },
   { id: "stock", nome: "Stock" },
 ];

@@ -9,9 +9,11 @@ import type { Funcionario, OrdemProducao, ZonaProducao } from "@/lib/types";
    Badges de tipo de linha (Assembling / Termoformadora / Stock)
    ============================================================ */
 const TIPO_BADGE: Record<string, { label: string; cor: string }> = {
-  assembling: { label: "Assembling", cor: "bg-amber-100 text-amber-700 border-amber-200" },
+  manual: { label: "Manual", cor: "bg-amber-100 text-amber-700 border-amber-200" },
   termoformadora: { label: "Termo", cor: "bg-violet-100 text-violet-700 border-violet-200" },
   stock: { label: "Stock", cor: "bg-cyan-100 text-cyan-700 border-cyan-200" },
+  // Retrocompatibilidade
+  assembling: { label: "Manual", cor: "bg-amber-100 text-amber-700 border-amber-200" },
 };
 
 /* ============================================================
