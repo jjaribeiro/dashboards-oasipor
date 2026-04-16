@@ -127,6 +127,7 @@ export interface ZonaProducao {
   area: AreaProducao;
   ordem: number;
   tipo: TipoZona;
+  responsavel: string | null;
   created_at: string;
 }
 
@@ -177,6 +178,7 @@ export interface OrdemProducao {
   inicio: string | null;
   fim_previsto: string | null;
   fim_real: string | null;
+  responsavel: string | null;
   notas: string | null;
   created_at: string;
   updated_at: string;

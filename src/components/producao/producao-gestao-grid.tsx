@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { supabase } from "@/lib/supabase/client";
+import { toast } from "sonner";
 import { CardZona } from "./card-zona";
 import { CardCiclo } from "./card-ciclo";
 import { FormOP } from "./form-op";
@@ -73,6 +75,12 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
   };
   const openTeam = (zonaId: string) => setEquipaForm({ open: true, zona: zonaId });
 
+  const moveOP = useCallback(async (opId: string, novaZonaId: string) => {
+    const { error } = await supabase.from("ordens_producao").update({ zona_id: novaZonaId }).eq("id", opId);
+    if (error) toast.error("Erro ao mover OP");
+    else toast.success("OP movida");
+  }, []);
+
   return (
     <div className={cn("flex h-full flex-col", kiosk && "kiosk")}>
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 shadow-sm">
@@ -97,15 +105,16 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
       </header>
 
       <div className="flex flex-1 min-h-0 flex-col gap-2 overflow-hidden p-3">
-        {/* Linha de produção: 5 zonas em colunas iguais */}
-        <div className="flex min-h-0 flex-1 flex-col">
+        {/* Produção: 4 colunas — SL1 | SL2 Picking | SL2 Linhas (Manual+Termo) | Embalamento */}
+        <div className="flex min-h-0 flex-[3] flex-col">
           <div className="mb-1 flex items-center gap-2">
             {porArea.sala_limpa_1 && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.sala_limpa_1)}>{AREA_LABEL.sala_limpa_1}</span>}
             {porArea.sala_limpa_2 && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.sala_limpa_2)}>{AREA_LABEL.sala_limpa_2}</span>}
             {porArea.embalamento && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.embalamento)}>{AREA_LABEL.embalamento}</span>}
           </div>
-          <div className="grid min-h-0 flex-1 grid-cols-5 gap-2">
-            {[...(porArea.sala_limpa_1 ?? []), ...(porArea.sala_limpa_2 ?? []), ...(porArea.embalamento ?? [])].map((z) => (
+          <div className="grid min-h-0 flex-1 grid-cols-4 gap-2">
+            {/* SL1 */}
+            {(porArea.sala_limpa_1 ?? []).map((z) => (
               <CardZona
                 key={z.id}
                 zona={z}
@@ -113,15 +122,64 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
                 funcionarios={funcionarios}
                 onOpenOP={openOP}
                 onOpenTeam={openTeam}
+                onMoveOP={moveOP}
+                kiosk={kiosk}
+              />
+            ))}
+            {/* SL2 Picking */}
+            {(porArea.sala_limpa_2 ?? []).filter((z) => z.tipo === "picking").map((z) => (
+              <CardZona
+                key={z.id}
+                zona={z}
+                ordens={opsPorZona[z.id] ?? []}
+                funcionarios={funcionarios}
+                onOpenOP={openOP}
+                onOpenTeam={openTeam}
+                onMoveOP={moveOP}
+                kiosk={kiosk}
+              />
+            ))}
+            {/* SL2 Linhas (Manual + Termoformadora combinadas) */}
+            {(() => {
+              const linhas = (porArea.sala_limpa_2 ?? []).filter((z) => z.tipo === "linha");
+              const principal = linhas[0];
+              const extra = linhas.slice(1);
+              if (!principal) return null;
+              const ordensLinhas = linhas.flatMap((z) => opsPorZona[z.id] ?? []);
+              return (
+                <CardZona
+                  key="sl2-linhas"
+                  zona={{ ...principal, nome: "SL2 — Linhas", responsavel: principal.responsavel }}
+                  zonasExtra={extra}
+                  ordens={ordensLinhas}
+                  funcionarios={funcionarios}
+                  onOpenOP={openOP}
+                  onOpenTeam={openTeam}
+                  onMoveOP={moveOP}
+                  kiosk={kiosk}
+                  showLinhaBadge
+                />
+              );
+            })()}
+            {/* Embalamento */}
+            {(porArea.embalamento ?? []).map((z) => (
+              <CardZona
+                key={z.id}
+                zona={z}
+                ordens={opsPorZona[z.id] ?? []}
+                funcionarios={funcionarios}
+                onOpenOP={openOP}
+                onOpenTeam={openTeam}
+                onMoveOP={moveOP}
                 kiosk={kiosk}
               />
             ))}
           </div>
         </div>
 
-        {/* Esterilização: 5 câmaras em colunas iguais */}
+        {/* Esterilização: 5 câmaras — mais curto */}
         {porArea.esterilizacao && (
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-[1] flex-col">
             <div className="mb-1">
               <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.esterilizacao)}>{AREA_LABEL.esterilizacao}</span>
             </div>
