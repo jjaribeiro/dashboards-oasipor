@@ -104,30 +104,50 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
         )}
       </div>
 
-      <div className="flex-1 space-y-1.5 overflow-y-auto p-2">
-        {emCurso.length > 0 ? emCurso.map((op) => (
-          <OPRow key={op.id} op={op} principal onClick={onOpenOP ? () => onOpenOP(op, op.zona_id) : undefined} showLinha={showLinhaBadge} />
-        )) : (
-          <div className="rounded-lg border border-dashed border-slate-200 p-2 text-center text-xs font-bold text-slate-400">
-            Sem OP em curso
-          </div>
-        )}
-        {ativas.filter((o) => o.estado !== "em_curso").slice(0, 3).map((op) => (
-          <OPRow key={op.id} op={op} onClick={onOpenOP ? () => onOpenOP(op, op.zona_id) : undefined} showLinha={showLinhaBadge} />
-        ))}
+      <div className="flex-1 flex flex-col gap-2 overflow-hidden p-2">
+        {(() => {
+          // Máximo 4 OPs visíveis — em_curso primeiro, depois restantes
+          const visiveis: OrdemProducao[] = [];
+          emCurso.forEach((op) => { if (visiveis.length < 4) visiveis.push(op); });
+          ativas.filter((o) => o.estado !== "em_curso").forEach((op) => { if (visiveis.length < 4) visiveis.push(op); });
+          const restantes = ativas.length - visiveis.length;
+
+          return visiveis.length > 0 ? (
+            <>
+              {visiveis.map((op) => (
+                <OPRow
+                  key={op.id}
+                  op={op}
+                  principal={op.estado === "em_curso"}
+                  onClick={onOpenOP ? () => onOpenOP(op, op.zona_id) : undefined}
+                  showLinha={showLinhaBadge}
+                />
+              ))}
+              {restantes > 0 && (
+                <div className="text-center text-[10px] font-bold text-slate-400">
+                  +{restantes} OP{restantes > 1 ? "s" : ""}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center rounded-lg border border-dashed border-slate-200 text-xs font-bold text-slate-400">
+              Sem OP em curso
+            </div>
+          );
+        })()}
       </div>
 
-      <div className="border-t border-slate-200 bg-slate-50 px-2 py-1">
+      <div className="border-t border-slate-200 bg-slate-50 px-3 py-2">
         {responsaveis.length > 0 && (
-          <div className="mb-0.5 flex items-center gap-1 text-[10px] font-bold">
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-bold">
             <span className="text-slate-400">Resp:</span>
-            <span className="text-slate-700">{responsaveis.join(", ")}</span>
+            <span className="text-slate-800">{responsaveis.join(", ")}</span>
           </div>
         )}
         <button
           onClick={onOpenTeam ? () => onOpenTeam(zona.id) : undefined}
           className={cn(
-            "flex w-full items-center gap-1.5 text-left text-[10px] font-bold",
+            "flex w-full items-center gap-2 text-left text-xs font-bold",
             onOpenTeam && "cursor-pointer hover:text-slate-900"
           )}
         >
@@ -137,7 +157,7 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
             {equipa.map((f) => (
               <span
                 key={f.id}
-                className="inline-flex h-5 items-center gap-1 rounded-full px-1.5 text-[10px] font-extrabold text-white shadow-sm"
+                className="inline-flex h-6 items-center gap-1 rounded-full px-2 text-xs font-extrabold text-white shadow-sm"
                 style={{ backgroundColor: f.cor ?? "#64748b" }}
                 title={f.nome}
               >
@@ -175,40 +195,40 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
       onDragStart={handleDragStart}
       onClick={onClick}
       className={cn(
-        "rounded-lg border p-1.5 transition-all select-none",
+        "flex-1 rounded-xl border p-3 transition-all select-none",
         principal ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white",
         "cursor-grab active:cursor-grabbing active:opacity-60 active:scale-[0.97]",
         onClick && "hover:shadow-md"
       )}
     >
-      <div className="flex items-start justify-between gap-1">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             {op.produto_codigo && (
-              <span className="shrink-0 rounded bg-slate-900 px-1 py-0.5 font-mono text-[9px] font-extrabold text-white">
+              <span className="shrink-0 rounded-md bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] font-extrabold text-white">
                 {op.produto_codigo}
               </span>
             )}
             {linhaBadge && (
-              <span className={cn("shrink-0 rounded border px-1 py-0.5 text-[9px] font-extrabold", linhaBadge.cor)}>
+              <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-[11px] font-extrabold", linhaBadge.cor)}>
                 {linhaBadge.label}
               </span>
             )}
-            <p className={cn("truncate font-bold text-slate-900", principal ? "text-xs" : "text-[11px]")}>
+            <p className={cn("truncate font-extrabold text-slate-900", principal ? "text-sm" : "text-xs")}>
               {op.produto_nome}
             </p>
           </div>
-          <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-500">
+          <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
             {op.numero && <span>OP {op.numero}</span>}
             {op.cliente && <span className="truncate">· {op.cliente}</span>}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <span className={cn("rounded border px-1 py-0.5 text-[9px] font-bold", ESTADO_OP_COR[op.estado])}>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className={cn("rounded-md border px-1.5 py-0.5 text-[11px] font-bold", ESTADO_OP_COR[op.estado])}>
             {ESTADO_OP_LABEL[op.estado]}
           </span>
           {op.prioridade !== "normal" && (
-            <span className={cn("rounded border px-1 py-0.5 text-[9px] font-bold capitalize", PRIORIDADE_OP_COR[op.prioridade])}>
+            <span className={cn("rounded-md border px-1.5 py-0.5 text-[11px] font-bold capitalize", PRIORIDADE_OP_COR[op.prioridade])}>
               {op.prioridade}
             </span>
           )}
@@ -216,8 +236,8 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
       </div>
 
       {op.quantidade_alvo > 0 && (
-        <div className="mt-1">
-          <div className="flex items-center justify-between text-[9px] font-bold text-slate-600">
+        <div className="mt-2">
+          <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
             <span>{op.quantidade_atual} / {op.quantidade_alvo}</span>
             {restante !== null && (
               <span suppressHydrationWarning className={cn(restante < 0 ? "text-red-600" : "text-slate-500")}>
@@ -225,7 +245,7 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
               </span>
             )}
           </div>
-          <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-200">
+          <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
             <div
               suppressHydrationWarning
               className={cn("h-full rounded-full transition-all", principal ? "bg-emerald-500" : "bg-slate-400")}
