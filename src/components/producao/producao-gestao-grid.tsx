@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useCallback } from "react";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useUpdateReminder } from "@/hooks/use-update-reminder";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { CardZona } from "./card-zona";
@@ -26,6 +27,7 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
   const { items: ops } = useRealtimeTable<OrdemProducao>("ordens_producao", initialOPs, { orderBy: "updated_at", ascending: false });
   const { items: ciclos } = useRealtimeTable<EquipamentoCiclo>("equipamento_ciclo", initialCiclos, { orderBy: "updated_at", ascending: false });
   const { items: funcionarios } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
+  const updateReminder = useUpdateReminder();
 
   // Form states
   const [opForm, setOPForm] = useState<{ open: boolean; zona: string; item: OrdemProducao | null }>({ open: false, zona: "", item: null });
@@ -109,6 +111,21 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
         </div>
         <ClockDisplay />
       </header>
+
+      {updateReminder.show && (
+        <div className="flex items-center justify-between gap-4 bg-amber-500 px-6 py-2 text-white shadow-md">
+          <div className="flex items-center gap-2 font-bold">
+            <span className="text-lg">⚠</span>
+            <span>Hora de atualizar os dados de produção!</span>
+          </div>
+          <button
+            onClick={updateReminder.dismiss}
+            className="rounded-lg bg-white px-4 py-1.5 text-sm font-extrabold text-amber-700 shadow transition-colors hover:bg-amber-50"
+          >
+            Atualizado ✓
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-1 min-h-0 flex-col gap-2 overflow-hidden p-3">
         {/* Produção: 4 colunas — SL1 | SL2 Picking | SL2 Linhas (Assembling+Termo) | Embalamento */}

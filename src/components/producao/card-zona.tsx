@@ -88,7 +88,7 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
       <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5">
         <div className="flex items-center gap-2 min-w-0">
           <h3 className={cn("truncate font-extrabold text-slate-900", kiosk ? "text-base" : "text-sm")}>
-            {ZONA_LABEL[zona.id] ?? zona.nome}
+            {showLinhaBadge ? zona.nome : (ZONA_LABEL[zona.id] ?? zona.nome)}
           </h3>
           <span className="rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
             {ativas.length} OP{ativas.length === 1 ? "" : "s"}
@@ -172,7 +172,7 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
 function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; principal?: boolean; onClick?: () => void; showLinha?: boolean }) {
   const pct = op.quantidade_alvo > 0 ? Math.min(100, (op.quantidade_atual / op.quantidade_alvo) * 100) : 0;
   const restante = minutesUntil(op.fim_previsto);
-  const tipoBadge = showLinha && op.tipo_linha ? TIPO_BADGE[op.tipo_linha] : undefined;
+  const tipoBadge = op.tipo_linha ? TIPO_BADGE[op.tipo_linha] : undefined;
 
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData("application/op-id", op.id);
