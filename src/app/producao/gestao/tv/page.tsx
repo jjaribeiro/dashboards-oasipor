@@ -15,7 +15,7 @@ export default async function ProducaoGestaoTv() {
   ]);
 
   return (
-    <main className="h-full">
+    <main className="h-dvh overflow-hidden">
       <ProducaoGestaoGrid
         zonas={(zonas.data ?? []) as ZonaProducao[]}
         initialOPs={(ops.data ?? []) as OrdemProducao[]}
