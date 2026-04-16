@@ -91,7 +91,8 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
 
   return (
     <div
-      className={cn("fixed inset-0 flex flex-col overflow-hidden", kiosk && "kiosk")}
+      className={cn("flex flex-col overflow-hidden", kiosk && "kiosk")}
+      style={{ height: "100vh" }}
     >
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 shadow-sm">
         <div className="flex items-center gap-4">
