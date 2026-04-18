@@ -5,12 +5,12 @@ export const dynamic = "force-static";
 
 const TILES = [
   {
-    href: "/comercial",
-    title: "Comercial",
-    subtitle: "Concursos · Cotações · Encomendas · Amostras · Tarefas",
-    icon: "📊",
-    accent: "from-blue-500 to-indigo-600",
-    ring: "ring-blue-200",
+    href: "/producao/planeamento",
+    title: "Produção — Planeamento",
+    subtitle: "Importar OPs · KPIs · Gantt · Auditoria · Rejeitados · Paragens",
+    icon: "📅",
+    accent: "from-purple-500 to-fuchsia-600",
+    ring: "ring-purple-200",
   },
   {
     href: "/producao/gestao",

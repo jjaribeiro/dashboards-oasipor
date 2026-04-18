@@ -99,6 +99,27 @@ export interface Amostra {
 
 export type TableName = "concursos" | "cotacoes" | "encomendas" | "tarefas" | "amostras";
 
+export interface Pessoa {
+  id: string;
+  nome: string;
+  pin: string;
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuditLog {
+  id: string;
+  pessoa_id: string | null;
+  pessoa_nome: string | null;
+  acao: string;
+  alvo_tabela: string | null;
+  alvo_id: string | null;
+  zona_id: string | null;
+  detalhes: Record<string, unknown> | null;
+  created_at: string;
+}
+
 // ============ PRODUÇÃO ============
 
 export type ZonaId =
@@ -129,25 +150,28 @@ export interface ZonaProducao {
   ordem: number;
   tipo: TipoZona;
   responsavel: string | null;
+  meta_diaria_un: number | null;
+  meta_horaria_un: number | null;
   created_at: string;
 }
 
-export type CategoriaProduto =
-  | "campos_cirurgicos"
-  | "laminado"
-  | "mascaras"
-  | "toucas"
-  | "cobre_sapatos"
-  | "pack"
-  | "outros";
+export type CategoriaMeta = "packs_trouxas" | "campos_cirurgicos";
+
+export interface MetaCategoria {
+  categoria: CategoriaMeta;
+  meta_diaria_un: number | null;
+  meta_semanal_un: number | null;
+  meta_mensal_un: number | null;
+  updated_at: string;
+}
 
 export interface Produto {
   id: string;
-  nome: string;
-  categoria: CategoriaProduto;
-  sku: string | null;
-  unidade: string | null;
+  referencia: string;
+  descricao: string;
+  tipo: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface Funcionario {
@@ -162,19 +186,61 @@ export interface Funcionario {
 }
 
 export type EstadoOP = "planeada" | "em_curso" | "pausada" | "concluida" | "cancelada";
-export type PrioridadeOP = "baixa" | "normal" | "alta" | "urgente";
-export type TipoLinha = "assembling" | "termoformadora" | "stock" | null;
+export type PrioridadeOP = "por_definir" | "baixa" | "normal" | "alta" | "urgente";
+export type TipoLinha = "manual" | "termoformadora" | "stock" | "campos" | null;
+export type CategoriaProduto = "campo" | "trouxa" | "pack" | "outros";
+export type EstadoPedido = "pendente" | "programado" | "em_producao" | "concluido" | "cancelado";
 
-export interface OrdemProducao {
+export type StockStatus = "ok" | "pendente";
+
+export interface PedidoProducao {
   id: string;
   numero: string | null;
-  zona_id: ZonaId;
+  ficha_producao: string | null; // do Excel "Ficha de Produção"
   produto_id: string | null;
   produto_codigo: string | null;
   produto_nome: string;
   cliente: string | null;
+  comercial: string | null;
+  categoria: CategoriaProduto | null;
+  tipo_linha: TipoLinha;
+  quantidade_alvo: number;
+  quantidade_por_caixa: number | null;
+  qtd_total_pp: number | null; // qty total do Pedido de Produção (do Excel "Qtd_ped" / "Qtd PP")
+  qtd_pendente_pp: number | null; // qty que ainda falta produzir do PP (do Excel "Pendente")
+  stock_existente: number | null; // qty em stock (do Excel "Stock")
+  reservas_existentes: number | null; // qty reservada para outros pedidos (do Excel "Reservas")
+  consumos_6m: number | null; // consumos últimos 6 meses (do Excel "Consumos6m")
+  stock_status: StockStatus | null; // indicador manual ou inferido: stock OK ou Pendente
+  prioridade: PrioridadeOP;
+  inicio_previsto: string | null;
+  fim_previsto: string | null; // deadline do cliente (do Excel)
+  data_agendada: string | null; // dia alvo de produção definido pelo "Programar Tudo"
+  inicio_real: string | null;
+  fim_real: string | null;
+  estado: EstadoPedido;
+  notas: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrdemProducao {
+  id: string;
+  numero: string | null;
+  pedido_id: string | null;
+  zona_id: ZonaId;
+  produto_id: string | null;
+  produto_codigo: string | null;
+  produto_nome: string;
+  lote: string | null;
+  cliente: string | null;
+  categoria: CategoriaProduto | null;
   quantidade_alvo: number;
   quantidade_atual: number;
+  quantidade_rejeitada: number;
+  ordem_fila: number | null;
+  motivo_pausa: string | null;
+  pausada_em: string | null;
   estado: EstadoOP;
   prioridade: PrioridadeOP;
   tipo_linha: TipoLinha;
@@ -186,6 +252,32 @@ export interface OrdemProducao {
   notas: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProducaoRejeito {
+  id: string;
+  op_id: string;
+  zona_id: string | null;
+  pessoa_id: string | null;
+  pessoa_nome: string | null;
+  quantidade: number;
+  motivo: string;
+  notas: string | null;
+  created_at: string;
+}
+
+export interface ProducaoPausa {
+  id: string;
+  op_id: string;
+  zona_id: string | null;
+  pessoa_id: string | null;
+  pessoa_nome: string | null;
+  motivo: string;
+  inicio: string;
+  fim: string | null;
+  duracao_min: number | null;
+  notas: string | null;
+  created_at: string;
 }
 
 export type EstadoCiclo = "vazio" | "em_ciclo" | "concluido" | "alarme";
@@ -217,7 +309,7 @@ export interface EquipamentoCiclo {
   inicio: string | null;
   fim_previsto: string | null;
   fim_real: string | null;
-  temperatura: number | null;
+  arejamento_destino: string | null;
   notas: string | null;
   created_at: string;
   updated_at: string;

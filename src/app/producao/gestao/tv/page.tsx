@@ -1,5 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ProducaoGestaoGrid } from "@/components/producao/producao-gestao-grid";
+import { AutoRefresh } from "@/components/auto-refresh";
 import type { EquipamentoCiclo, Funcionario, OrdemProducao, ZonaProducao } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +17,9 @@ export default async function ProducaoGestaoTv() {
 
   return (
     <main className="h-dvh overflow-hidden">
+      <AutoRefresh intervalSeconds={30} />
       <ProducaoGestaoGrid
-        zonas={(zonas.data ?? []) as ZonaProducao[]}
+        initialZonas={(zonas.data ?? []) as ZonaProducao[]}
         initialOPs={(ops.data ?? []) as OrdemProducao[]}
         initialCiclos={(ciclos.data ?? []) as EquipamentoCiclo[]}
         initialFuncionarios={(funcionarios.data ?? []) as Funcionario[]}

@@ -120,6 +120,12 @@ export function getPriorityColor(priority: string): string {
   }
 }
 
+/** Formata datetime curto para cards: "16 Abr 14:30" */
+export function formatShortDateTime(dateStr: string | null): string {
+  if (!dateStr) return "";
+  return format(new Date(dateStr), "d MMM HH:mm", { locale: pt });
+}
+
 /** Formata duração em minutos como "5h 30m" ou "45m". */
 export function formatDuration(minutes: number): string {
   if (!Number.isFinite(minutes)) return "—";
@@ -146,6 +152,36 @@ export function cycleProgress(inicio: string | null, fimPrevisto: string | null)
   const now = Date.now();
   const pct = (now - start) / (end - start);
   return Math.max(0, Math.min(1, pct));
+}
+
+/**
+ * Prioridade efetiva em cascata: quando várias linhas partilham o mesmo pedido
+ * (mesmo `numero`/PP), só a primeira mantém a prioridade original; as seguintes
+ * descem um nível. Evita que todas as linhas do mesmo PP concorram na mesma
+ * prioridade.
+ */
+export function computePrioridadeEfetiva<
+  T extends { id: string; numero: string | null; prioridade: string }
+>(pedidos: T[]): Map<string, "urgente" | "alta" | "normal" | "baixa" | "por_definir"> {
+  const ordem = ["urgente", "alta", "normal", "baixa", "por_definir"] as const;
+  const rank = (p: string) => Math.max(0, ordem.indexOf(p as typeof ordem[number]));
+  const grupos = new Map<string, T[]>();
+  for (const p of pedidos) {
+    const key = p.numero ?? `__solo__${p.id}`;
+    const arr = grupos.get(key) ?? [];
+    arr.push(p);
+    grupos.set(key, arr);
+  }
+  const out = new Map<string, typeof ordem[number]>();
+  for (const arr of grupos.values()) {
+    arr.sort((a, b) => a.id.localeCompare(b.id));
+    arr.forEach((p, i) => {
+      const baseIdx = rank(p.prioridade);
+      const idx = Math.min(ordem.length - 1, baseIdx + i);
+      out.set(p.id, ordem[idx]);
+    });
+  }
+  return out;
 }
 
 export function getPriorityBadgeColor(priority: string): string {

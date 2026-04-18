@@ -1,18 +1,20 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { cn, formatDuration, minutesUntil } from "@/lib/utils";
+import { useRef, useState, useEffect } from "react";
+import { cn, formatDuration, minutesUntil, formatShortDateTime } from "@/lib/utils";
 import { ESTADO_OP_COR, ESTADO_OP_LABEL, PRIORIDADE_OP_COR, ZONA_LABEL } from "@/lib/constants";
 import type { Funcionario, OrdemProducao, ZonaProducao } from "@/lib/types";
 
+const OPS_PER_PAGE = 3;
+const ROTATION_SECONDS = 15;
+
 /* ============================================================
-   Badges de tipo de linha (Assembling / Termoformadora / Stock)
+   Badges de tipo de linha (Manual / Termoformadora / Stock)
    ============================================================ */
 const TIPO_BADGE: Record<string, { label: string; cor: string }> = {
   manual: { label: "Manual", cor: "bg-amber-100 text-amber-700 border-amber-200" },
   termoformadora: { label: "Termo", cor: "bg-violet-100 text-violet-700 border-violet-200" },
   stock: { label: "Stock", cor: "bg-cyan-100 text-cyan-700 border-cyan-200" },
-  // Retrocompatibilidade
   assembling: { label: "Manual", cor: "bg-amber-100 text-amber-700 border-amber-200" },
 };
 
@@ -21,7 +23,6 @@ const TIPO_BADGE: Record<string, { label: string; cor: string }> = {
    ============================================================ */
 interface CardZonaProps {
   zona: ZonaProducao;
-  /** Zonas extra cujas OPs também aparecem neste card */
   zonasExtra?: ZonaProducao[];
   ordens: OrdemProducao[];
   funcionarios: Funcionario[];
@@ -29,17 +30,46 @@ interface CardZonaProps {
   onOpenTeam?: (zonaId: string) => void;
   onMoveOP?: (opId: string, novaZonaId: string) => void;
   kiosk?: boolean;
-  /** Mostrar badges de linha quando há zonas combinadas */
   showLinhaBadge?: boolean;
 }
 
 export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onOpenTeam, onMoveOP, kiosk, showLinhaBadge }: CardZonaProps) {
   const allZonaIds = [zona.id, ...(zonasExtra?.map((z) => z.id) ?? [])];
   const emCurso = ordens.filter((o) => o.estado === "em_curso");
-  const ativas = ordens.filter((o) => o.estado === "em_curso" || o.estado === "planeada" || o.estado === "pausada");
+  const ativas = ordens.filter((o) =>
+    o.estado === "em_curso" || o.estado === "planeada" || o.estado === "pausada" || o.estado === "concluida"
+  );
   const equipa = funcionarios.filter((f) => f.zona_atual && allZonaIds.includes(f.zona_atual) && f.ativo);
 
-  // Drag & drop com counter para evitar flicker em child elements
+  // Ordenar por inicio_previsto asc (mais antiga primeiro: 16, 21, 23, 29…)
+  const ativasOrdenadas = [...ativas].sort((a, b) => {
+    const da = a.inicio_previsto ?? a.created_at;
+    const db = b.inicio_previsto ?? b.created_at;
+    return new Date(da).getTime() - new Date(db).getTime();
+  });
+
+  // Paginação / carrossel
+  const totalPages = Math.max(1, Math.ceil(ativasOrdenadas.length / OPS_PER_PAGE));
+  const needsCarousel = totalPages > 1;
+  const [page, setPage] = useState(0);
+
+  // Clamp page if data changes
+  useEffect(() => {
+    if (page >= totalPages) setPage(0);
+  }, [page, totalPages]);
+
+  // Auto-rotate
+  useEffect(() => {
+    if (!needsCarousel) return;
+    const id = setInterval(() => {
+      setPage((p) => (p + 1) % totalPages);
+    }, ROTATION_SECONDS * 1000);
+    return () => clearInterval(id);
+  }, [needsCarousel, totalPages]);
+
+  const pageOPs = ativasOrdenadas.slice(page * OPS_PER_PAGE, (page + 1) * OPS_PER_PAGE);
+
+  // Drag & drop
   const dragCounter = useRef(0);
   const [dragOver, setDragOver] = useState(false);
 
@@ -48,20 +78,14 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
     dragCounter.current++;
     setDragOver(true);
   }
-
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   }
-
   function handleDragLeave() {
     dragCounter.current--;
-    if (dragCounter.current <= 0) {
-      dragCounter.current = 0;
-      setDragOver(false);
-    }
+    if (dragCounter.current <= 0) { dragCounter.current = 0; setDragOver(false); }
   }
-
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     dragCounter.current = 0;
@@ -73,7 +97,6 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
     }
   }
 
-  // Responsáveis únicos de todas as zonas combinadas
   const responsaveis = [...new Set([zona.responsavel, ...(zonasExtra?.map((z) => z.responsavel) ?? [])].filter(Boolean))];
 
   return (
@@ -87,6 +110,7 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
         dragOver ? "border-blue-400 ring-2 ring-blue-200 bg-blue-50/30" : "border-slate-200"
       )}
     >
+      {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5">
         <div className="flex items-center gap-2 min-w-0">
           <h3 className={cn("truncate font-extrabold text-slate-900", kiosk ? "text-base" : "text-sm")}>
@@ -95,18 +119,31 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
           <span className="rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
             {ativas.length} OP{ativas.length === 1 ? "" : "s"}
           </span>
+          {needsCarousel && (
+            <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">
+              {page + 1}/{totalPages}
+            </span>
+          )}
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-1.5 overflow-hidden p-2">
-        {(() => {
-          const MAX = 4;
-          const visiveis: OrdemProducao[] = [];
-          emCurso.forEach((op) => { if (visiveis.length < MAX) visiveis.push(op); });
-          ativas.filter((o) => o.estado !== "em_curso").forEach((op) => { if (visiveis.length < MAX) visiveis.push(op); });
-          const restantes = ativas.length - visiveis.length;
+      {/* Progress bar do carrossel */}
+      {needsCarousel && (
+        <div className="h-1 w-full bg-slate-100">
+          <div
+            key={`${page}-${totalPages}`}
+            className="h-full bg-blue-400"
+            style={{
+              animation: `progressFill ${ROTATION_SECONDS}s linear`,
+            }}
+          />
+        </div>
+      )}
 
-          const items: React.ReactNode[] = visiveis.map((op) => (
+      {/* OPs — grid de 3 linhas iguais para preencher o espaço */}
+      <div className="grid flex-1 grid-rows-3 gap-1 overflow-hidden p-1.5">
+        {pageOPs.length > 0 ? (
+          pageOPs.map((op) => (
             <OPRow
               key={op.id}
               op={op}
@@ -114,28 +151,15 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
               onClick={onOpenOP ? () => onOpenOP(op, op.zona_id) : undefined}
               showLinha={showLinhaBadge}
             />
-          ));
-
-          if (restantes > 0) {
-            items.push(
-              <div key="rest" className="flex items-center justify-center rounded-xl border border-dashed border-slate-200 py-2 text-xs font-bold text-slate-400">
-                +{restantes} OP{restantes > 1 ? "s" : ""}
-              </div>
-            );
-          }
-
-          if (items.length === 0) {
-            items.push(
-              <div key="empty" className="flex flex-1 items-center justify-center text-xs font-bold text-slate-300">
-                Sem OPs ativas
-              </div>
-            );
-          }
-
-          return items;
-        })()}
+          ))
+        ) : (
+          <div className="row-span-3 flex items-center justify-center text-xs font-bold text-slate-300">
+            Sem OPs ativas
+          </div>
+        )}
       </div>
 
+      {/* Footer */}
       <div className="border-t border-slate-200 bg-slate-50 px-3 py-2">
         {responsaveis.length > 0 && (
           <div className="mb-1 flex items-center gap-1.5 text-xs font-bold">
@@ -171,22 +195,28 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
 }
 
 /* ============================================================
-   OPRow — agora draggable + badge de linha opcional
+   OPRow — draggable + badge de linha
    ============================================================ */
 function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; principal?: boolean; onClick?: () => void; showLinha?: boolean }) {
   const pct = op.quantidade_alvo > 0 ? Math.min(100, (op.quantidade_atual / op.quantidade_alvo) * 100) : 0;
   const restante = minutesUntil(op.fim_previsto);
   const tipoBadge = op.tipo_linha ? TIPO_BADGE[op.tipo_linha] : undefined;
+  const concluida = op.estado === "concluida";
+  const atraso = !concluida && restante !== null && restante < 0;
 
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData("application/op-id", op.id);
     e.dataTransfer.setData("application/from-zona", op.zona_id);
     e.dataTransfer.effectAllowed = "move";
-    // Ghost image com slight scale
     if (e.currentTarget instanceof HTMLElement) {
       e.dataTransfer.setDragImage(e.currentTarget, 0, 0);
     }
   }
+
+  // Linha compacta: OP + cliente + datas tudo junto
+  const infoSegments: string[] = [];
+  if (op.numero) infoSegments.push(`OP ${op.numero}`);
+  if (op.cliente) infoSegments.push(op.cliente);
 
   return (
     <div
@@ -194,57 +224,83 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
       onDragStart={handleDragStart}
       onClick={onClick}
       className={cn(
-        "flex flex-col rounded-xl border p-2.5 transition-all select-none",
-        principal ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white",
+        "flex min-h-0 flex-col justify-center overflow-hidden rounded-lg border border-l-4 px-2 py-1.5 transition-all select-none",
+        concluida ? "border-blue-200 border-l-blue-400 bg-blue-50" :
+        atraso ? "border-red-300 border-l-red-500 bg-red-50/40 ring-1 ring-red-200" :
+        principal ? "border-emerald-200 border-l-emerald-400 bg-emerald-50" :
+        "border-slate-200 border-l-slate-300 bg-white",
         "cursor-grab active:cursor-grabbing active:opacity-60 active:scale-[0.97]",
         onClick && "hover:shadow-md"
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {op.produto_codigo && (
-              <span className="shrink-0 rounded-md bg-slate-900 px-2 py-0.5 font-mono text-sm font-extrabold text-white">
-                {op.produto_codigo}
-              </span>
-            )}
-            {tipoBadge && (
-              <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-[11px] font-extrabold", tipoBadge.cor)}>
-                {tipoBadge.label}
-              </span>
-            )}
-            <div className="flex shrink-0 items-center gap-1">
-              <span className={cn("rounded-md border px-1.5 py-0.5 text-[11px] font-bold", ESTADO_OP_COR[op.estado])}>
-                {ESTADO_OP_LABEL[op.estado]}
-              </span>
-              {op.prioridade !== "normal" && (
-                <span className={cn("rounded-md border px-1.5 py-0.5 text-[11px] font-bold capitalize", PRIORIDADE_OP_COR[op.prioridade])}>
-                  {op.prioridade}
-                </span>
-              )}
-            </div>
-          </div>
-          <p className={cn("mt-1 line-clamp-2 font-extrabold leading-tight text-slate-900", principal ? "text-base" : "text-sm")}>
-            {op.produto_nome}
-          </p>
-          <div className="mt-0.5 flex items-center gap-2 text-sm font-bold text-slate-500">
-            {op.numero && <span className="shrink-0">OP {op.numero}</span>}
-            {op.cliente && <span className="truncate">· {op.cliente}</span>}
-          </div>
-        </div>
+      {/* Linha 1: badges (ref, tipo, estado, prioridade) */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {op.produto_codigo && (
+          <span className="shrink-0 rounded-md bg-slate-900 px-2 py-0.5 font-mono text-sm font-extrabold text-white">
+            {op.produto_codigo}
+          </span>
+        )}
+        {tipoBadge && (
+          <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-xs font-extrabold", tipoBadge.cor)}>
+            {tipoBadge.label}
+          </span>
+        )}
+        <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-xs font-bold", ESTADO_OP_COR[op.estado])}>
+          {ESTADO_OP_LABEL[op.estado]}
+        </span>
+        {op.prioridade !== "normal" && (
+          <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-xs font-bold capitalize", PRIORIDADE_OP_COR[op.prioridade])}>
+            {op.prioridade}
+          </span>
+        )}
+        {atraso && (
+          <span className="shrink-0 rounded-md bg-red-500 px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white shadow-sm animate-pulse">
+            ⚠ Atraso
+          </span>
+        )}
       </div>
 
+      {/* Linha 2: nome do produto + lote — até 2 linhas */}
+      <p className="mt-1 line-clamp-2 text-sm font-extrabold leading-snug text-slate-900">
+        {op.produto_nome}
+        {op.lote && (
+          <span className="ml-1.5 rounded-md bg-sky-100 px-1.5 py-0.5 text-xs font-extrabold text-sky-700">
+            Lote {op.lote}
+          </span>
+        )}
+      </p>
+
+      {/* Linha 3: OP + cliente + datas */}
+      <div className="mt-0.5 flex items-center gap-2 text-sm font-bold text-slate-400">
+        {infoSegments.length > 0 && (
+          <span className="shrink-0 text-slate-500">{infoSegments.join(" · ")}</span>
+        )}
+        {(op.inicio_previsto || op.fim_previsto) && infoSegments.length > 0 && (
+          <span className="text-slate-200">|</span>
+        )}
+        {op.inicio_previsto && (
+          <span suppressHydrationWarning>▸{formatShortDateTime(op.inicio_previsto)}</span>
+        )}
+        {op.inicio_previsto && op.fim_previsto && <span className="text-slate-200">→</span>}
+        {op.fim_previsto && (
+          <span suppressHydrationWarning className={cn(atraso && "text-red-500")}>
+            ■{formatShortDateTime(op.fim_previsto)}
+          </span>
+        )}
+      </div>
+
+      {/* Linha 4: barra de progresso */}
       {op.quantidade_alvo > 0 && (
-        <div className="mt-2">
-          <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+        <div className="mt-1.5">
+          <div className="flex items-center justify-between text-sm font-bold text-slate-600">
             <span>{op.quantidade_atual} / {op.quantidade_alvo}</span>
-            {restante !== null && (
-              <span suppressHydrationWarning className={cn(restante < 0 ? "text-red-600" : "text-slate-500")}>
-                {restante < 0 ? `+${formatDuration(-restante)}` : `${formatDuration(restante)}`}
+            {restante !== null && !concluida && (
+              <span suppressHydrationWarning className={cn(atraso ? "text-red-600" : "text-slate-500")}>
+                {atraso ? `+${formatDuration(-restante)}` : formatDuration(restante)}
               </span>
             )}
           </div>
-          <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-200">
+          <div className="mt-0.5 h-2 overflow-hidden rounded-full bg-slate-200">
             <div
               suppressHydrationWarning
               className={cn("h-full rounded-full transition-all", principal ? "bg-emerald-500" : "bg-slate-400")}

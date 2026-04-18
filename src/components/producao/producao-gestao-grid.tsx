@@ -3,6 +3,8 @@
 import { useMemo, useState, useCallback } from "react";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { useUpdateReminder } from "@/hooks/use-update-reminder";
+import { useAutoMoveCiclos } from "@/hooks/use-auto-move-ciclos";
+import { useDelayAlert } from "@/hooks/use-delay-alert";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { CardZona } from "./card-zona";
@@ -16,22 +18,37 @@ import { cn } from "@/lib/utils";
 import type { EquipamentoCiclo, Funcionario, OrdemProducao, ZonaProducao } from "@/lib/types";
 
 interface Props {
-  zonas: ZonaProducao[];
+  initialZonas: ZonaProducao[];
   initialOPs: OrdemProducao[];
   initialCiclos: EquipamentoCiclo[];
   initialFuncionarios: Funcionario[];
   kiosk?: boolean;
 }
 
-export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFuncionarios, kiosk = false }: Props) {
-  const { items: ops } = useRealtimeTable<OrdemProducao>("ordens_producao", initialOPs, { orderBy: "updated_at", ascending: false });
-  const { items: ciclos } = useRealtimeTable<EquipamentoCiclo>("equipamento_ciclo", initialCiclos, { orderBy: "updated_at", ascending: false });
+export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, initialFuncionarios, kiosk = false }: Props) {
+  const { items: zonas } = useRealtimeTable<ZonaProducao>("zonas_producao", initialZonas, { orderBy: "ordem" });
+  const { items: opsRaw, setItems: setOps } = useRealtimeTable<OrdemProducao>("ordens_producao", initialOPs, { orderBy: "updated_at", ascending: false });
+  const { items: ciclos, setItems: setCiclos } = useRealtimeTable<EquipamentoCiclo>("equipamento_ciclo", initialCiclos, { orderBy: "updated_at", ascending: false });
   const { items: funcionarios } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
+
+  // Filtrar concluidas/canceladas do lado do cliente (o realtime traz tudo)
+  const ops = useMemo(() => opsRaw.filter((o) => o.estado !== "concluida" && o.estado !== "cancelada"), [opsRaw]);
+
+  // Optimistic update helpers
+  function patchOp(id: string, patch: Partial<OrdemProducao>) {
+    setOps((prev) => prev.map((o) => o.id === id ? { ...o, ...patch } : o));
+  }
+  function patchCiclo(id: string, patch: Partial<EquipamentoCiclo>) {
+    setCiclos((prev) => prev.map((c) => c.id === id ? { ...c, ...patch } : c));
+  }
   const updateReminder = useUpdateReminder();
+
+  // Auto-move ciclos de esterilização
+  useAutoMoveCiclos(ciclos);
 
   // Form states
   const [opForm, setOPForm] = useState<{ open: boolean; zona: string; item: OrdemProducao | null }>({ open: false, zona: "", item: null });
-  const [cicloForm, setCicloForm] = useState<{ open: boolean; zona: string; item: EquipamentoCiclo | null; isEster: boolean }>({ open: false, zona: "", item: null, isEster: false });
+  const [cicloForm, setCicloForm] = useState<{ open: boolean; zona: string; item: EquipamentoCiclo | null }>({ open: false, zona: "", item: null });
   const [equipaForm, setEquipaForm] = useState<{ open: boolean; zona: string }>({ open: false, zona: "" });
 
   // Grouping
@@ -72,22 +89,23 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
 
   const openOP = (item: OrdemProducao | null, zonaId: string) => setOPForm({ open: true, zona: zonaId, item });
   const openCiclo = (item: EquipamentoCiclo | null, zonaId: string) => {
-    const z = zonas.find((zz) => zz.id === zonaId);
-    setCicloForm({ open: true, zona: zonaId, item, isEster: z?.tipo === "esterilizador" });
+    setCicloForm({ open: true, zona: zonaId, item });
   };
   const openTeam = (zonaId: string) => setEquipaForm({ open: true, zona: zonaId });
 
-  const moveOP = useCallback(async (opId: string, novaZonaId: string) => {
-    const { error } = await supabase.from("ordens_producao").update({ zona_id: novaZonaId }).eq("id", opId);
-    if (error) toast.error("Erro ao mover OP");
-    else toast.success("OP movida");
-  }, []);
+  const moveOP = useCallback((opId: string, novaZonaId: string) => {
+    patchOp(opId, { zona_id: novaZonaId as OrdemProducao["zona_id"] });
+    toast.success("OP movida");
+    supabase.from("ordens_producao").update({ zona_id: novaZonaId }).eq("id", opId)
+      .then(({ error }) => { if (error) toast.error("Erro ao mover OP"); });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const moveCiclo = useCallback(async (cicloId: string, novaZonaId: string) => {
-    const { error } = await supabase.from("equipamento_ciclo").update({ zona_id: novaZonaId }).eq("id", cicloId);
-    if (error) toast.error("Erro ao mover ciclo");
-    else toast.success("Ciclo movido");
-  }, []);
+  const moveCiclo = useCallback((cicloId: string, novaZonaId: string) => {
+    patchCiclo(cicloId, { zona_id: novaZonaId as EquipamentoCiclo["zona_id"] });
+    toast.success("Ciclo movido");
+    supabase.from("equipamento_ciclo").update({ zona_id: novaZonaId }).eq("id", cicloId)
+      .then(({ error }) => { if (error) toast.error("Erro ao mover ciclo"); });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
@@ -131,7 +149,7 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
       )}
 
       <div className="flex flex-1 min-h-0 flex-col gap-2 overflow-hidden p-3">
-        {/* Produção: 4 colunas — SL1 | SL2 Picking | SL2 Linhas (Assembling+Termo) | Embalamento */}
+        {/* Produção: 4 colunas — SL1 | SASC Picking | SL2 Linhas (Assembling+Termo) | Embalamento */}
         <div className="flex min-h-0 flex-[3] flex-col">
           <div className="mb-1 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -139,12 +157,6 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
               {porArea.sala_limpa_2 && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.sala_limpa_2)}>{AREA_LABEL.sala_limpa_2}</span>}
               {porArea.embalamento && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.embalamento)}>{AREA_LABEL.embalamento}</span>}
             </div>
-            <button
-              onClick={() => openOP(null, "")}
-              className="rounded-md bg-slate-900 px-3 py-1 text-xs font-bold text-white shadow-sm transition-colors hover:bg-slate-700"
-            >
-              + Adicionar OP
-            </button>
           </div>
           <div className="grid min-h-0 flex-1 grid-cols-4 gap-2">
             {/* SL1 */}
@@ -160,7 +172,7 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
                 kiosk={kiosk}
               />
             ))}
-            {/* SL2 Picking */}
+            {/* SASC Picking */}
             {(porArea.sala_limpa_2 ?? []).filter((z) => z.tipo === "picking").map((z) => (
               <CardZona
                 key={z.id}
@@ -245,6 +257,7 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
           onOpenChange={(o) => setOPForm((s) => ({ ...s, open: o }))}
           editItem={opForm.item}
           defaultZona={opForm.zona}
+          painelMode={!!opForm.item}
         />
       )}
       {cicloForm.open && (
@@ -253,7 +266,6 @@ export function ProducaoGestaoGrid({ zonas, initialOPs, initialCiclos, initialFu
           onOpenChange={(o) => setCicloForm((s) => ({ ...s, open: o }))}
           editItem={cicloForm.item}
           zonaId={cicloForm.zona}
-          isEsterilizador={cicloForm.isEster}
         />
       )}
       {equipaForm.open && (

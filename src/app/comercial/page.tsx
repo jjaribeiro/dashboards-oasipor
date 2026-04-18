@@ -1,5 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
+import { DashboardAuthGate } from "@/components/dashboard-auth-gate";
 import type { Concurso, Cotacao, Encomenda, Tarefa, Amostra } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,14 +37,16 @@ export default async function Comercial() {
   ]);
 
   return (
-    <main className="h-full">
-      <DashboardGrid
-        initialConcursos={(concursos.data ?? []) as Concurso[]}
-        initialCotacoes={(cotacoes.data ?? []) as Cotacao[]}
-        initialEncomendas={(encomendas.data ?? []) as Encomenda[]}
-        initialTarefas={(tarefas.data ?? []) as Tarefa[]}
-        initialAmostras={(amostras.data ?? []) as Amostra[]}
-      />
-    </main>
+    <DashboardAuthGate dashboardKey="comercial" title="Painel Comercial">
+      <main className="h-full">
+        <DashboardGrid
+          initialConcursos={(concursos.data ?? []) as Concurso[]}
+          initialCotacoes={(cotacoes.data ?? []) as Cotacao[]}
+          initialEncomendas={(encomendas.data ?? []) as Encomenda[]}
+          initialTarefas={(tarefas.data ?? []) as Tarefa[]}
+          initialAmostras={(amostras.data ?? []) as Amostra[]}
+        />
+      </main>
+    </DashboardAuthGate>
   );
 }

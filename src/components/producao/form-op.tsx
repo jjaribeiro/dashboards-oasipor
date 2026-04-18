@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,21 +9,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/lib/supabase/client";
 import { ZONAS_OP, TIPO_LINHA_OPTIONS } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { OrdemProducao } from "@/lib/types";
+import type { OrdemProducao, Produto } from "@/lib/types";
 
 interface FormOPProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editItem?: OrdemProducao | null;
   defaultZona?: string;
+  /** Modo painel: apenas edita Qtd Feita / Estado / Notas. Restante é read-only. */
+  painelMode?: boolean;
 }
 
 /** Mapeia zona do form + tipo_linha → zona_id real no DB */
 function resolveZonaId(formZona: string, tipoLinha: string | null): string {
   if (formZona === "sl2_linhas") {
     if (tipoLinha === "termoformadora") return "sl2_termo";
-    return "sl2_manual"; // assembling ou stock na linha
+    return "sl2_manual";
   }
   return formZona;
 }
@@ -34,16 +37,64 @@ function formZonaFromId(zonaId: string): string {
   return zonaId;
 }
 
-export function FormOP({ open, onOpenChange, editItem, defaultZona }: FormOPProps) {
+export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode = false }: FormOPProps) {
   const [loading, setLoading] = useState(false);
   const [selectedZona, setSelectedZona] = useState(
     editItem ? formZonaFromId(editItem.zona_id) : (defaultZona ? formZonaFromId(defaultZona) : "")
   );
 
+  // Autocomplete de produtos
+  const [produtos, setProdutos] = useState<Produto[]>([]);
+  const [refValue, setRefValue] = useState(editItem?.produto_codigo ?? "");
+  const [nomeValue, setNomeValue] = useState(editItem?.produto_nome ?? "");
+  const [suggestions, setSuggestions] = useState<Produto[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    supabase.from("produtos").select("*").order("referencia").then(({ data }) => {
+      if (data) setProdutos(data as Produto[]);
+    });
+  }, []);
+
+  function handleRefChange(val: string) {
+    setRefValue(val);
+    if (val.trim().length >= 1) {
+      const matches = produtos.filter((p) =>
+        p.referencia.toLowerCase().includes(val.toLowerCase())
+      ).slice(0, 8);
+      setSuggestions(matches);
+      setShowSuggestions(matches.length > 0);
+    } else {
+      setShowSuggestions(false);
+    }
+  }
+
+  function selectProduto(p: Produto) {
+    setRefValue(p.referencia);
+    setNomeValue(p.descricao);
+    setShowSuggestions(false);
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
     const form = new FormData(e.currentTarget);
+
+    // Modo painel: apenas atualiza quantidade_atual / estado / notas
+    if (painelMode && editItem) {
+      const patch = {
+        quantidade_atual: Number(form.get("quantidade_atual") || 0),
+        estado: form.get("estado") as string,
+        notas: (form.get("notas") as string) || null,
+      };
+      const { error } = await supabase.from("ordens_producao").update(patch).eq("id", editItem.id);
+      setLoading(false);
+      if (error) { toast.error("Erro ao guardar"); return; }
+      toast.success("OP atualizada");
+      onOpenChange(false);
+      return;
+    }
 
     const formZona = form.get("zona_id") as string;
     const tipoLinha = (form.get("tipo_linha") as string) || null;
@@ -52,9 +103,11 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona }: FormOPProp
     const data = {
       numero: (form.get("numero") as string) || null,
       zona_id: zonaId,
-      produto_codigo: (form.get("produto_codigo") as string) || null,
-      produto_nome: form.get("produto_nome") as string,
+      produto_codigo: refValue.trim() || null,
+      produto_nome: nomeValue.trim(),
+      lote: (form.get("lote") as string) || null,
       cliente: (form.get("cliente") as string) || null,
+      categoria: (form.get("categoria") as string) || null,
       quantidade_alvo: Number(form.get("quantidade_alvo") || 0),
       quantidade_atual: Number(form.get("quantidade_atual") || 0),
       estado: form.get("estado") as string,
@@ -113,6 +166,84 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona }: FormOPProp
     }
   }
 
+  // Modo painel: render reduzido
+  if (painelMode && editItem) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto border-slate-200 bg-white text-slate-900 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Atualizar OP</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            {/* Info read-only */}
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+              <div className="flex items-center gap-2">
+                {editItem.produto_codigo && (
+                  <span className="rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] font-extrabold text-white">
+                    {editItem.produto_codigo}
+                  </span>
+                )}
+                <span className="font-extrabold text-slate-900">{editItem.produto_nome}</span>
+              </div>
+              <div className="mt-1 text-xs font-bold text-slate-500">
+                {editItem.cliente ?? "—"}
+                {editItem.lote && <span className="ml-2 rounded bg-sky-100 px-1 text-sky-700">L {editItem.lote}</span>}
+              </div>
+              <div className="mt-1 text-[11px] font-bold text-slate-400">
+                Alvo: {editItem.quantidade_alvo} un · Zona: {editItem.zona_id}
+              </div>
+              <p className="mt-2 text-[10px] font-bold text-slate-400">
+                Alterações estruturais (produto, zona, datas, prioridade) apenas em Planeamento.
+              </p>
+            </div>
+
+            <div>
+              <Label htmlFor="quantidade_atual">Qtd Feita</Label>
+              <Input
+                id="quantidade_atual"
+                name="quantidade_atual"
+                type="number"
+                min={0}
+                defaultValue={editItem.quantidade_atual ?? 0}
+                className="mt-1"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="estado">Estado</Label>
+              <Select name="estado" defaultValue={editItem.estado ?? "planeada"}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="planeada">Planeada</SelectItem>
+                  <SelectItem value="em_curso">Em Curso</SelectItem>
+                  <SelectItem value="pausada">Pausada</SelectItem>
+                  <SelectItem value="concluida">Concluída</SelectItem>
+                  <SelectItem value="cancelada">Cancelada</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="notas">Notas</Label>
+              <Textarea id="notas" name="notas" rows={2} defaultValue={editItem.notas ?? ""} className="mt-1" />
+            </div>
+
+            <div className="mt-2 flex gap-2">
+              <Button type="submit" disabled={loading} className="flex-1">
+                {loading ? "A guardar..." : "Guardar"}
+              </Button>
+              {editItem.estado !== "concluida" && (
+                <Button type="button" variant="secondary" onClick={concluir} className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200">
+                  ✓ Concluir
+                </Button>
+              )}
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-slate-200 bg-white text-slate-900 sm:max-w-md">
@@ -143,7 +274,7 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona }: FormOPProp
             </div>
           </div>
 
-          {/* Tipo: Assembling / Termoformadora / Stock */}
+          {/* Tipo: Manual / Termoformadora / Stock */}
           <div>
             <Label htmlFor="tipo_linha">Tipo</Label>
             <select
@@ -159,19 +290,72 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona }: FormOPProp
             </select>
           </div>
 
+          {/* Ref com autocomplete + Nome do produto */}
           <div className="grid grid-cols-[120px_1fr] gap-3">
-            <div>
+            <div className="relative">
               <Label htmlFor="produto_codigo">Ref / Código</Label>
-              <Input id="produto_codigo" name="produto_codigo" defaultValue={editItem?.produto_codigo ?? ""} className="mt-1 font-mono" placeholder="ex: 213112" />
+              <Input
+                id="produto_codigo"
+                value={refValue}
+                onChange={(e) => handleRefChange(e.target.value)}
+                onFocus={() => { if (refValue.trim().length >= 1) handleRefChange(refValue); }}
+                onBlur={() => { setTimeout(() => setShowSuggestions(false), 200); }}
+                className="mt-1 font-mono"
+                placeholder="ex: 213112"
+                autoComplete="off"
+              />
+              {showSuggestions && (
+                <div ref={suggestionsRef} className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                  {suggestions.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onMouseDown={() => selectProduto(p)}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50"
+                    >
+                      <span className="font-mono font-bold text-slate-900">{p.referencia}</span>
+                      <span className="truncate text-slate-500">{p.descricao}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <Label htmlFor="produto_nome">Produto *</Label>
-              <Input id="produto_nome" name="produto_nome" required defaultValue={editItem?.produto_nome ?? ""} className="mt-1" placeholder="ex: Campo cirúrgico 75×90" />
+              <Input
+                id="produto_nome"
+                value={nomeValue}
+                onChange={(e) => setNomeValue(e.target.value)}
+                required
+                className="mt-1"
+                placeholder="ex: Campo cirúrgico 75×90"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-[1fr_140px] gap-3">
+            <div>
+              <Label htmlFor="cliente">Cliente</Label>
+              <Input id="cliente" name="cliente" defaultValue={editItem?.cliente ?? ""} className="mt-1" placeholder="ex: ULS Alto Ave" />
+            </div>
+            <div>
+              <Label htmlFor="lote">Lote</Label>
+              <Input id="lote" name="lote" defaultValue={editItem?.lote ?? ""} className="mt-1" placeholder="ex: A" />
             </div>
           </div>
           <div>
-            <Label htmlFor="cliente">Cliente</Label>
-            <Input id="cliente" name="cliente" defaultValue={editItem?.cliente ?? ""} className="mt-1" placeholder="ex: ULS Alto Ave" />
+            <Label htmlFor="categoria">Categoria</Label>
+            <select
+              id="categoria"
+              name="categoria"
+              defaultValue={editItem?.categoria ?? ""}
+              className="mt-1 flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+            >
+              <option value="">— Nenhum —</option>
+              <option value="campo">Campo Cirúrgico</option>
+              <option value="trouxa">Trouxa</option>
+              <option value="pack">Pack</option>
+              <option value="outros">Outros</option>
+            </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -220,10 +404,7 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona }: FormOPProp
               <Input id="fim_previsto" name="fim_previsto" type="datetime-local" defaultValue={defaultFim} className="mt-1" />
             </div>
           </div>
-          <div>
-            <Label htmlFor="responsavel">Responsável</Label>
-            <Input id="responsavel" name="responsavel" defaultValue={editItem?.responsavel ?? ""} className="mt-1" placeholder="ex: João Silva" />
-          </div>
+          <input type="hidden" name="responsavel" value={editItem?.responsavel ?? ""} />
           <div>
             <Label htmlFor="notas">Notas</Label>
             <Textarea id="notas" name="notas" rows={2} defaultValue={editItem?.notas ?? ""} className="mt-1" />

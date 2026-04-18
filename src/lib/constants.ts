@@ -64,9 +64,9 @@ export const RESPONSAVEIS = ["Joana Romão", "Ana Leal"] as const;
 // ============ PRODUÇÃO ============
 
 export const ZONA_LABEL: Record<string, string> = {
-  sl1: "Sala Limpa 1",
-  sl2_picking: "SL2 — Picking",
-  sl2_manual: "SL2 — Assembling",
+  sl1: "SL1",
+  sl2_picking: "SASC — Picking",
+  sl2_manual: "SL2 — Manual",
   sl2_termo: "SL2 — Termoformadora",
   embalamento: "Embalamento",
   stock: "Stock",
@@ -78,7 +78,7 @@ export const ZONA_LABEL: Record<string, string> = {
 };
 
 export const AREA_LABEL: Record<string, string> = {
-  sala_limpa_1: "Sala Limpa 1",
+  sala_limpa_1: "SL1",
   sala_limpa_2: "Sala Limpa 2",
   esterilizacao: "Esterilização",
   embalamento: "Embalamento",
@@ -117,7 +117,32 @@ export const ESTADO_OP_COR: Record<string, string> = {
   cancelada: "bg-slate-100 text-slate-400 border-slate-200",
 };
 
+export const ESTADO_PEDIDO_LABEL: Record<string, string> = {
+  pendente: "Pendente",
+  programado: "Programado",
+  em_producao: "Em Produção",
+  concluido: "Concluído",
+  cancelado: "Cancelado",
+};
+
+export const ESTADO_PEDIDO_COR: Record<string, string> = {
+  pendente: "bg-slate-100 text-slate-700 border-slate-200",
+  programado: "bg-sky-100 text-sky-700 border-sky-200",
+  em_producao: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  concluido: "bg-blue-100 text-blue-700 border-blue-200",
+  cancelado: "bg-slate-100 text-slate-400 border-slate-200",
+};
+
+export const PRIORIDADE_OP_LABEL: Record<string, string> = {
+  por_definir: "Por definir",
+  baixa: "Baixa",
+  normal: "Normal",
+  alta: "Alta",
+  urgente: "Urgente",
+};
+
 export const PRIORIDADE_OP_COR: Record<string, string> = {
+  por_definir: "bg-slate-50 text-slate-400 border-slate-200 italic",
   baixa: "bg-slate-100 text-slate-600 border-slate-200",
   normal: "bg-sky-100 text-sky-700 border-sky-200",
   alta: "bg-orange-100 text-orange-700 border-orange-200",
@@ -140,17 +165,17 @@ export const ESTADO_CICLO_COR: Record<string, string> = {
 
 // Durações típicas (minutos) — defaults para os forms de início de ciclo
 export const DURACAO_DEFAULT_MIN: Record<string, number> = {
-  pre_cond_1: 12 * 60,      // 12 h
-  pre_cond_2: 12 * 60,
-  esterilizador: 6 * 60,    // 6 h
+  pre_cond_1: 24 * 60,      // 24 h
+  pre_cond_2: 24 * 60,
+  esterilizador: 10 * 60,   // 10 h
   arejamento_1: 24 * 60,    // 24 h
   arejamento_2: 24 * 60,
 };
 
 export const ZONAS_ORDEM: Array<{ id: string; nome: string; area: string }> = [
-  { id: "sl1", nome: "Sala Limpa 1", area: "sala_limpa_1" },
-  { id: "sl2_picking", nome: "SL2 — Picking", area: "sala_limpa_2" },
-  { id: "sl2_manual", nome: "SL2 — Assembling", area: "sala_limpa_2" },
+  { id: "sl1", nome: "SL1", area: "sala_limpa_1" },
+  { id: "sl2_picking", nome: "SASC — Picking", area: "sala_limpa_2" },
+  { id: "sl2_manual", nome: "SL2 — Manual", area: "sala_limpa_2" },
   { id: "sl2_termo", nome: "SL2 — Termoformadora", area: "sala_limpa_2" },
   { id: "embalamento", nome: "Embalamento", area: "embalamento" },
   { id: "stock", nome: "Stock", area: "embalamento" },
@@ -163,8 +188,8 @@ export const ZONAS_ORDEM: Array<{ id: string; nome: string; area: string }> = [
 
 /** Zonas disponíveis no form de OPs (sem esterilização) */
 export const ZONAS_OP: Array<{ id: string; nome: string }> = [
-  { id: "sl1", nome: "Sala Limpa 1" },
-  { id: "sl2_picking", nome: "SL2 — Picking" },
+  { id: "sl1", nome: "SL1" },
+  { id: "sl2_picking", nome: "SASC — Picking" },
   { id: "sl2_linhas", nome: "SL2 — Linhas" },
   { id: "embalamento", nome: "Embalamento" },
 ];
@@ -179,4 +204,26 @@ export const TIPO_LINHA_OPTIONS: Array<{ id: string; nome: string }> = [
   { id: "manual", nome: "Manual" },
   { id: "termoformadora", nome: "Termoformadora" },
   { id: "stock", nome: "Stock" },
+];
+
+export const MOTIVOS_PAUSA: Array<{ id: string; label: string; icon: string }> = [
+  { id: "pausa_cafe", label: "Pausa / Café", icon: "☕" },
+  { id: "almoco", label: "Almoço", icon: "🍽" },
+  { id: "reuniao", label: "Reunião", icon: "👥" },
+  { id: "falta_materia", label: "Falta de matéria-prima", icon: "📦" },
+  { id: "avaria_equipamento", label: "Avaria de equipamento", icon: "🔧" },
+  { id: "manutencao", label: "Manutenção", icon: "🛠" },
+  { id: "limpeza", label: "Limpeza", icon: "🧹" },
+  { id: "troca_turno", label: "Troca de turno", icon: "🔄" },
+  { id: "outro", label: "Outro", icon: "❓" },
+];
+
+export const MOTIVOS_REJEITO: Array<{ id: string; label: string; icon: string }> = [
+  { id: "defeito_material", label: "Defeito no material", icon: "❌" },
+  { id: "erro_embalamento", label: "Erro de embalamento", icon: "📦" },
+  { id: "contaminacao", label: "Contaminação", icon: "⚠" },
+  { id: "dimensao_errada", label: "Dimensão errada", icon: "📏" },
+  { id: "selagem_defeituosa", label: "Selagem defeituosa", icon: "🔗" },
+  { id: "marcacao_errada", label: "Marcação errada", icon: "🏷" },
+  { id: "outro", label: "Outro", icon: "❓" },
 ];

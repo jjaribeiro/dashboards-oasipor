@@ -46,3 +46,7 @@ next-env.d.ts
 /Logo/
 
 .vercel
+
+# excel files (dados locais)
+*.xlsx
+~$*.xlsx

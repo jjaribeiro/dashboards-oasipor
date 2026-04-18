@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { cn, cycleProgress, formatDuration, minutesUntil } from "@/lib/utils";
 import { ESTADO_CICLO_COR, ESTADO_CICLO_LABEL, ZONA_LABEL } from "@/lib/constants";
 import { useNow } from "@/hooks/use-now";
-import type { EquipamentoCiclo, PaleteDetalhe, ZonaProducao } from "@/lib/types";
+import type { EquipamentoCiclo, ZonaProducao } from "@/lib/types";
 
 interface CardCicloProps {
   zona: ZonaProducao;
@@ -20,7 +20,6 @@ export function CardCiclo({ zona, ciclo, onOpenCiclo, onMoveCiclo, kiosk }: Card
   const progress = ciclo ? cycleProgress(ciclo.inicio, ciclo.fim_previsto) : 0;
   const restante = ciclo ? minutesUntil(ciclo.fim_previsto) : null;
   const atraso = restante !== null && restante < 0;
-  const isEster = zona.tipo === "esterilizador";
 
   // Drag & drop
   const dragCounter = useRef(0);
@@ -86,15 +85,33 @@ export function CardCiclo({ zona, ciclo, onOpenCiclo, onMoveCiclo, kiosk }: Card
       </div>
 
       <div className="flex flex-1 flex-col justify-between gap-2 p-3">
-        {ciclo && ciclo.conteudo && (
-          <p className="truncate text-xs font-bold text-slate-700">{ciclo.conteudo}</p>
+        {/* Fluxo: de onde veio → para onde vai */}
+        {ciclo && estado === "em_ciclo" && (
+          <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
+            {(zona.id === "esterilizador") && <span>← Pré-Cond</span>}
+            {(zona.id === "arejamento_1" || zona.id === "arejamento_2") && <span>← Esterilizador</span>}
+            {(zona.id === "pre_cond_1" || zona.id === "pre_cond_2") && (
+              <span>→ Esterilizador → {ciclo.arejamento_destino === "arejamento_2" ? "Arej 2" : "Arej 1"}</span>
+            )}
+            {zona.id === "esterilizador" && ciclo.arejamento_destino && (
+              <span className="ml-auto">→ {ciclo.arejamento_destino === "arejamento_2" ? "Arej 2" : "Arej 1"}</span>
+            )}
+          </div>
         )}
 
-        {/* Grelha de paletes */}
-        {ciclo?.paletes_detalhe && ciclo.paletes_detalhe.length > 0 && (
-          <PaletesMiniGrid paletes={ciclo.paletes_detalhe} capacidade={isEster ? 8 : undefined} />
+        {/* Grelha de paletes visual */}
+        {ciclo && ciclo.paletes && ciclo.paletes > 0 && (
+          <div className="grid grid-cols-4 gap-1">
+            {Array.from({ length: ciclo.paletes }, (_, i) => (
+              <div
+                key={i}
+                className="flex h-6 items-center justify-center rounded bg-emerald-500 text-[10px] font-extrabold text-white shadow-sm"
+              >
+                {i + 1}
+              </div>
+            ))}
+          </div>
         )}
-
 
         {estado === "em_ciclo" && ciclo?.inicio && ciclo?.fim_previsto && (
           <div>
@@ -139,31 +156,3 @@ export function CardCiclo({ zona, ciclo, onOpenCiclo, onMoveCiclo, kiosk }: Card
   );
 }
 
-function PaletesMiniGrid({ paletes, capacidade }: { paletes: PaleteDetalhe[]; capacidade?: number }) {
-  const total = capacidade ?? Math.max(paletes.length, 1);
-  const byPos = new Map<number, PaleteDetalhe>();
-  paletes.forEach((p) => byPos.set(p.posicao, p));
-  const slots = Array.from({ length: total }, (_, i) => byPos.get(i + 1) ?? null);
-
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <div className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">
-        Paletes <span className="text-slate-900">{paletes.length}</span>/{total}
-      </div>
-      <div className="grid flex-1 grid-cols-4 gap-0.5">
-        {slots.map((p, i) => (
-          <div
-            key={i}
-            title={p ? `P${p.posicao}: ${p.conteudo}${p.op_numero ? ` (${p.op_numero})` : ""}${p.quantidade ? ` — ${p.quantidade}un` : ""}${p.cliente ? ` · ${p.cliente}` : ""}` : `P${i + 1}: vazio`}
-            className={cn(
-              "flex h-5 items-center justify-center rounded text-[9px] font-extrabold",
-              p ? "bg-emerald-500 text-white shadow-sm" : "border border-dashed border-slate-300 bg-slate-50 text-slate-400"
-            )}
-          >
-            {i + 1}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
