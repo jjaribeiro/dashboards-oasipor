@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { useNow } from "@/hooks/use-now";
@@ -13,6 +13,7 @@ import { Numpad } from "./numpad";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PausaDialog } from "./pausa-dialog";
 import { RejeitoDialog } from "./rejeito-dialog";
+import { EquipaPresencaPanel } from "./equipa-presenca-panel";
 import { usePessoaSession, logAction } from "@/hooks/use-pessoa-session";
 import { useDelayAlert } from "@/hooks/use-delay-alert";
 import { MOTIVOS_PAUSA, MOTIVOS_REJEITO } from "@/lib/constants";
@@ -40,13 +41,18 @@ interface Props {
 
 // Transferências permitidas entre zonas (operador decide)
 const TRANSFERS_POSSIVEIS: Record<string, Array<{ id: string; label: string; cor: string }>> = {
-  sl1: [{ id: "embalamento", label: "Embalamento", cor: "bg-amber-500" }],
+  sl1_campos: [{ id: "sl2_embalamento", label: "Embalamento", cor: "bg-yellow-500" }],
+  sl1_laminados: [{ id: "sl2_embalamento", label: "Embalamento", cor: "bg-yellow-500" }],
+  sl1_mascaras: [{ id: "sl2_embalamento", label: "Embalamento", cor: "bg-yellow-500" }],
+  sl1_toucas: [{ id: "sl2_embalamento", label: "Embalamento", cor: "bg-yellow-500" }],
+  sl1_outros: [{ id: "sl2_embalamento", label: "Embalamento", cor: "bg-yellow-500" }],
   sl2_picking: [
     { id: "sl2_manual", label: "SL2 Manual", cor: "bg-amber-500" },
-    { id: "sl2_termo", label: "SL2 Termo", cor: "bg-violet-500" },
+    { id: "sl2_termo", label: "SL2 Termo", cor: "bg-orange-500" },
   ],
-  sl2_manual: [{ id: "embalamento", label: "Embalamento", cor: "bg-amber-500" }],
-  sl2_termo: [{ id: "embalamento", label: "Embalamento", cor: "bg-amber-500" }],
+  sl2_manual: [{ id: "sl2_embalamento", label: "Embalamento", cor: "bg-yellow-500" }],
+  sl2_termo: [{ id: "sl2_embalamento", label: "Embalamento", cor: "bg-yellow-500" }],
+  sl2_embalamento: [{ id: "pre_cond_1", label: "Pré-Cond 1 (EO)", cor: "bg-rose-500" }],
 };
 
 const TIPO_BADGE: Record<string, { label: string; cor: string }> = {
@@ -123,9 +129,35 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
       return new Date(da).getTime() - new Date(db).getTime();
     });
 
-  // Equipa: zonasAgrupadas ou só zona
+  // Equipa: vem da escala de hoje (com fallback para zona_atual)
   const zonasParaEquipa = zonasAgrupadas ?? [zona.id];
-  const equipa = funcionarios.filter((f) => f.zona_atual && zonasParaEquipa.includes(f.zona_atual) && f.ativo);
+  const [escalaHoje, setEscalaHoje] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const hojeStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+    const fetch = async () => {
+      const { data } = await supabase
+        .from("escala_funcionario")
+        .select("funcionario_id")
+        .in("zona_id", zonasParaEquipa)
+        .eq("data", hojeStr);
+      setEscalaHoje(new Set((data ?? []).map((r) => (r as { funcionario_id: string }).funcionario_id)));
+    };
+    fetch();
+    const ch = supabase
+      .channel("escala_op_" + zona.id)
+      .on("postgres_changes", { event: "*", schema: "public", table: "escala_funcionario" }, fetch)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zona.id, zonasParaEquipa.join(",")]);
+
+  const equipa = funcionarios.filter((f) => {
+    if (!f.ativo) return false;
+    if (escalaHoje.has(f.id)) return true;
+    // fallback: se não há escala de hoje para esta zona, usa zona_atual
+    if (escalaHoje.size === 0 && f.zona_atual && zonasParaEquipa.includes(f.zona_atual)) return true;
+    return false;
+  });
 
   const ciclo = ciclos[0];
 
@@ -143,23 +175,45 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
     logAction({ ...actor, acao: "qty_update", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { de: antiga, para: nova, produto: op.produto_codigo } });
   }
 
-  function iniciar(op: OrdemProducao) {
+  async function iniciar(op: OrdemProducao) {
+    if (op.bloqueada) { toast.error("OP bloqueada — a zona anterior ainda não concluiu"); return; }
+
+    // Verificar se há pelo menos 1 pessoa presente na zona (hoje)
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const { data: presencasHoje } = await supabase
+      .from("funcionario_presencas")
+      .select("funcionario_id, tipo, criado_em")
+      .eq("zona_id", zona.id)
+      .gte("criado_em", hoje.toISOString())
+      .order("criado_em", { ascending: false });
+    const ultimoPorPessoa = new Map<string, string>();
+    for (const r of (presencasHoje ?? []) as Array<{ funcionario_id: string; tipo: string }>) {
+      if (!ultimoPorPessoa.has(r.funcionario_id)) ultimoPorPessoa.set(r.funcionario_id, r.tipo);
+    }
+    const presentes = Array.from(ultimoPorPessoa.values()).filter((t) => t === "entrada" || t === "pausa_fim").length;
+    if (presentes === 0) {
+      toast.error("Sem pessoas registadas nesta zona. Alguém tem de dar entrada com PIN primeiro.");
+      return;
+    }
+
     const agora = new Date().toISOString();
-    patchOp(op.id, { estado: "em_curso", inicio: agora, fim_real: null });
-    toast.success("OP iniciada");
-    supabase.from("ordens_producao")
-      .update({ estado: "em_curso", inicio: agora, fim_real: null })
-      .eq("id", op.id)
+    const antes = { estado: op.estado, inicio: op.inicio, fim_real: op.fim_real };
+    const depois = { estado: "em_curso" as const, inicio: agora, fim_real: null };
+    patchOp(op.id, depois);
+    toast.success("OP iniciada", { duration: 8000, action: { label: "Desfazer", onClick: () => revertOp(op.id, antes, op.produto_nome) } });
+    supabase.from("ordens_producao").update(depois).eq("id", op.id)
       .then(({ error }) => { if (error) toast.error("Erro"); });
-    logAction({ ...actor, acao: "op_iniciar", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo } });
+    logAction({ ...actor, acao: "op_iniciar", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, antes } });
   }
 
-  function pausarComMotivo(op: OrdemProducao, motivoId: string, notas?: string) {
+  function pausarComMotivo(op: OrdemProducao, motivoId: string, notas: string | undefined, pessoas: Array<{ id: string; nome: string }>) {
     const motivoLabel = MOTIVOS_PAUSA.find((m) => m.id === motivoId)?.label ?? motivoId;
     const now = new Date().toISOString();
     setPausaDialog(null);
+    const antes = { estado: op.estado, motivo_pausa: op.motivo_pausa, pausada_em: op.pausada_em };
     patchOp(op.id, { estado: "pausada", motivo_pausa: motivoLabel, pausada_em: now });
-    toast.success(`OP pausada: ${motivoLabel}`);
+    const quemLabel = pessoas.length === 0 ? "" : pessoas.length === 1 ? ` · ${pessoas[0].nome}` : ` · ${pessoas.length} pessoas`;
+    toast.success(`OP pausada: ${motivoLabel}${quemLabel}`, { duration: 8000, action: { label: "Desfazer", onClick: () => revertOp(op.id, antes, op.produto_nome) } });
 
     // Fire-and-forget em paralelo
     supabase.from("ordens_producao")
@@ -167,17 +221,23 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
       .eq("id", op.id)
       .then(({ error }) => { if (error) toast.error("Erro a pausar"); });
 
-    supabase.from("producao_pausas").insert({
-      op_id: op.id,
-      zona_id: zona.id,
-      pessoa_id: actor.pessoaId,
-      pessoa_nome: actor.pessoaNome,
-      motivo: motivoLabel,
-      inicio: now,
-      notas: notas ?? null,
-    }).then(() => {});
+    // Uma linha por pessoa em pausa (ou 1 linha com o actor se nenhuma equipa)
+    const linhas = pessoas.length > 0
+      ? pessoas.map((p) => ({ pessoa_id: p.id, pessoa_nome: p.nome }))
+      : [{ pessoa_id: actor.pessoaId, pessoa_nome: actor.pessoaNome }];
+    for (const p of linhas) {
+      supabase.from("producao_pausas").insert({
+        op_id: op.id,
+        zona_id: zona.id,
+        pessoa_id: p.pessoa_id,
+        pessoa_nome: p.pessoa_nome,
+        motivo: motivoLabel,
+        inicio: now,
+        notas: notas ?? null,
+      }).then(() => {});
+    }
 
-    logAction({ ...actor, acao: "op_pausar", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, motivo: motivoLabel, notas } });
+    logAction({ ...actor, acao: "op_pausar", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, motivo: motivoLabel, notas, pessoas: pessoas.map((p) => p.nome), antes } });
   }
 
   function retomar(op: OrdemProducao) {
@@ -198,13 +258,38 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
   function concluirConfirmado(op: OrdemProducao) {
     setConfirmConcluir(null);
     const agora = new Date().toISOString();
+    const antes = { estado: op.estado, fim_real: op.fim_real };
     patchOp(op.id, { estado: "concluida", fim_real: agora });
-    toast.success("OP concluída");
+    toast.success("OP concluída", { duration: 8000, action: { label: "Desfazer", onClick: () => revertOp(op.id, antes, op.produto_nome) } });
     supabase.from("ordens_producao")
       .update({ estado: "concluida", fim_real: agora })
       .eq("id", op.id)
       .then(({ error }) => { if (error) toast.error("Erro"); });
-    logAction({ ...actor, acao: "op_concluir", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, qtd: op.quantidade_atual, rejeitados: op.quantidade_rejeitada } });
+    logAction({ ...actor, acao: "op_concluir", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, qtd: op.quantidade_atual, rejeitados: op.quantidade_rejeitada, antes } });
+  }
+
+  function revertOp(opId: string, antes: Record<string, unknown>, nome: string) {
+    patchOp(opId, antes);
+    supabase.from("ordens_producao").update(antes).eq("id", opId)
+      .then(({ error }) => { if (error) toast.error(`Erro a reverter: ${error.message}`); });
+    logAction({ ...actor, acao: "op_reverter", alvoTabela: "ordens_producao", alvoId: opId, zonaId: zona.id, detalhes: { produto: nome, reposto: antes } });
+    toast.success(`${nome}: revertido`);
+  }
+
+  async function reverterUltimaNaZona() {
+    const { data } = await supabase
+      .from("audit_log")
+      .select("id, acao, alvo_id, detalhes")
+      .eq("alvo_tabela", "ordens_producao")
+      .eq("zona_id", zona.id)
+      .in("acao", ["op_iniciar", "op_pausar", "op_concluir"])
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (!data || data.length === 0) { toast.info?.("Nada para reverter nesta zona"); return; }
+    const log = data[0];
+    const d = log.detalhes as { antes?: Record<string, unknown>; produto?: string } | null;
+    if (!d?.antes || !log.alvo_id) { toast.error("Registo sem estado anterior"); return; }
+    revertOp(log.alvo_id, d.antes, d.produto ?? "OP");
   }
 
   function registarRejeito(op: OrdemProducao, quantidade: number, motivoId: string, notas?: string) {
@@ -232,6 +317,34 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
     logAction({ ...actor, acao: "op_rejeito", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, quantidade, motivo: motivoLabel, notas } });
   }
 
+  async function solicitarCq(op: OrdemProducao) {
+    // Verifica se já existe pedido CQ pendente para esta OP
+    const { data: existente } = await supabase
+      .from("cq_inspecoes")
+      .select("id")
+      .eq("op_id", op.id)
+      .eq("resultado", "pendente")
+      .limit(1);
+    if (existente && existente.length > 0) {
+      toast.info?.("Já existe um pedido CQ pendente para esta OP");
+      return;
+    }
+    const { error } = await supabase.from("cq_inspecoes").insert({
+      op_id: op.id,
+      pedido_id: op.pedido_id,
+      produto_codigo: op.produto_codigo,
+      tamanho_amostra: 0,
+      checklist: [] as unknown as Record<string, unknown>[],
+      resultado: "pendente",
+      pessoa_id: actor.pessoaId,
+      pessoa_nome: actor.pessoaNome,
+      notas: null,
+    });
+    if (error) { toast.error("Erro a solicitar CQ: " + error.message); return; }
+    toast.success("CQ solicitado — equipa de Qualidade notificada");
+    logAction({ ...actor, acao: "cq_solicitar", alvoTabela: "cq_inspecoes", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo } });
+  }
+
   function transferir(op: OrdemProducao, destinoId: string, destinoLabel: string) {
     setTransferOP(null);
     // Remove da lista local (já não pertence a esta zona)
@@ -246,7 +359,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
         quantidade_atual: 0,
       })
       .eq("id", op.id)
-      .then(({ error }) => { if (error) toast.error("Erro a transferir"); });
+      .then(({ error }) => { if (error) { console.error("transfer error", error); toast.error(`Erro a transferir: ${error.message}`); } });
     logAction({ ...actor, acao: "op_transferir", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, de: zona.id, para: destinoId, qtd_transferida: op.quantidade_atual } });
   }
 
@@ -308,23 +421,12 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
           )}
         </div>
         <div className="flex items-center gap-3">
-          {equipa.length > 0 && (
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 shadow-sm">
-              <span className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Equipa</span>
-              <div className="flex -space-x-2">
-                {equipa.map((f) => (
-                  <span
-                    key={f.id}
-                    title={f.nome}
-                    className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-extrabold text-white shadow-md ring-2 ring-white"
-                    style={{ backgroundColor: f.cor ?? "#64748b" }}
-                  >
-                    {f.iniciais}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+          <EquipaPresencaPanel zonaId={zona.id} equipa={equipa} />
+          <button
+            onClick={reverterUltimaNaZona}
+            title="Reverter a última acção (iniciar/pausar/concluir) feita nesta zona"
+            className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-extrabold text-amber-700 hover:bg-amber-100"
+          >↶ Reverter última</button>
           <ClockDisplay />
         </div>
       </header>
@@ -367,6 +469,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
                       onEnd={() => setConfirmConcluir(op)}
                       onView={() => setViewOP({ open: true, item: op })}
                       onRejeito={() => setRejeitoDialog(op)}
+                      onSolicitarCq={() => solicitarCq(op)}
                       hasTransfers={getTransfersFor(op).length > 0}
                       onTransfer={() => {
                         const destinos = getTransfersFor(op);
@@ -461,8 +564,9 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
       )}
       {pausaDialog && (
         <PausaDialog
+          equipa={equipa}
           onCancel={() => setPausaDialog(null)}
-          onConfirm={(motivo, notas) => pausarComMotivo(pausaDialog, motivo, notas)}
+          onConfirm={(motivo, notas, pessoas) => pausarComMotivo(pausaDialog, motivo, notas, pessoas)}
         />
       )}
       {rejeitoDialog && (
@@ -488,12 +592,13 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
    OP ATUAL
    ========================================================== */
 function OPAtual({
-  op, compact = false, showSubBadge, onSetQty, onPause, onResume, onEnd, onView, onRejeito, hasTransfers, onTransfer,
+  op, compact = false, showSubBadge, onSetQty, onPause, onResume, onEnd, onView, onRejeito, onSolicitarCq, hasTransfers, onTransfer,
 }: {
   op: OrdemProducao; compact?: boolean; showSubBadge: boolean;
   onSetQty: (n: number) => void;
   onPause: () => void; onResume: () => void; onEnd: () => void; onView: () => void;
   onRejeito: () => void;
+  onSolicitarCq: () => void;
   hasTransfers: boolean; onTransfer: () => void;
 }) {
   const pct = op.quantidade_alvo > 0 ? Math.min(100, (op.quantidade_atual / op.quantidade_alvo) * 100) : 0;
@@ -679,12 +784,21 @@ function OPAtual({
               )}
             </div>
             {!ePicking && (
-              <button
-                onClick={onRejeito}
-                className="mt-2 rounded-2xl border-2 border-red-200 bg-red-50 py-3 text-sm font-extrabold text-red-700 transition-all hover:bg-red-100 active:scale-95"
-              >
-                ❌ Registar Rejeitados
-              </button>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  onClick={onRejeito}
+                  className="rounded-2xl border-2 border-red-200 bg-red-50 py-3 text-sm font-extrabold text-red-700 transition-all hover:bg-red-100 active:scale-95"
+                >
+                  ❌ Registar Rejeitados
+                </button>
+                <button
+                  onClick={onSolicitarCq}
+                  className="rounded-2xl border-2 border-sky-300 bg-sky-50 py-3 text-sm font-extrabold text-sky-700 transition-all hover:bg-sky-100 active:scale-95"
+                  title="Chamar a equipa de Qualidade para inspeção da OP"
+                >
+                  🔍 Solicitar CQ
+                </button>
+              </div>
             )}
           </>
         );

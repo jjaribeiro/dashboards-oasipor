@@ -9,9 +9,7 @@ import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { CardZona } from "./card-zona";
 import { CardCiclo } from "./card-ciclo";
-import { FormOP } from "./form-op";
 import { FormCiclo } from "./form-ciclo";
-import { FormEquipa } from "./form-equipa";
 import { ClockDisplay } from "@/components/clock-display";
 import { AREA_COR, AREA_LABEL } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -31,13 +29,34 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
   const { items: ciclos, setItems: setCiclos } = useRealtimeTable<EquipamentoCiclo>("equipamento_ciclo", initialCiclos, { orderBy: "updated_at", ascending: false });
   const { items: funcionarios } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
 
-  // Filtrar concluidas/canceladas do lado do cliente (o realtime traz tudo)
-  const ops = useMemo(() => opsRaw.filter((o) => o.estado !== "concluida" && o.estado !== "cancelada"), [opsRaw]);
+  // Semana actual (seg → sex) — mostra só OPs planeadas/em curso com overlap neste intervalo
+  const { weekStart, weekEnd, weekDays } = useMemo(() => {
+    const base = new Date();
+    base.setHours(12, 0, 0, 0);
+    const day = base.getDay() || 7;
+    base.setDate(base.getDate() - (day - 1));
+    const end = new Date(base);
+    end.setDate(end.getDate() + 5); // seg 12:00 → sáb 12:00 (cobre seg-sex)
+    const days = Array.from({ length: 5 }, (_, i) => {
+      const d = new Date(base);
+      d.setDate(d.getDate() + i);
+      return d;
+    });
+    return { weekStart: base, weekEnd: end, weekDays: days };
+  }, []);
 
-  // Optimistic update helpers
-  function patchOp(id: string, patch: Partial<OrdemProducao>) {
-    setOps((prev) => prev.map((o) => o.id === id ? { ...o, ...patch } : o));
-  }
+  // Filtrar concluidas/canceladas + restringir à semana actual
+  const ops = useMemo(() => opsRaw.filter((o) => {
+    if (o.estado === "concluida" || o.estado === "cancelada") return false;
+    const ini = o.inicio_previsto ? new Date(o.inicio_previsto) : null;
+    const fim = o.fim_previsto ? new Date(o.fim_previsto) : ini;
+    // Sem datas → não cabe nesta visão semanal
+    if (!ini || !fim) return false;
+    // Overlap: OP começa antes do fim da semana E acaba depois do início
+    return ini < weekEnd && fim >= weekStart;
+  }), [opsRaw, weekStart, weekEnd]);
+
+  // Optimistic update helpers (só para ciclos — OPs são geridas no Planeamento)
   function patchCiclo(id: string, patch: Partial<EquipamentoCiclo>) {
     setCiclos((prev) => prev.map((c) => c.id === id ? { ...c, ...patch } : c));
   }
@@ -46,10 +65,8 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
   // Auto-move ciclos de esterilização
   useAutoMoveCiclos(ciclos);
 
-  // Form states
-  const [opForm, setOPForm] = useState<{ open: boolean; zona: string; item: OrdemProducao | null }>({ open: false, zona: "", item: null });
+  // Form states — só ciclos são editáveis aqui; OPs e equipas são geridas no Planeamento
   const [cicloForm, setCicloForm] = useState<{ open: boolean; zona: string; item: EquipamentoCiclo | null }>({ open: false, zona: "", item: null });
-  const [equipaForm, setEquipaForm] = useState<{ open: boolean; zona: string }>({ open: false, zona: "" });
 
   // Grouping
   const porArea = useMemo(() => {
@@ -87,18 +104,9 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
   const opsAtraso = ops.filter((o) => o.estado === "em_curso" && o.fim_previsto && new Date(o.fim_previsto) < new Date()).length;
   const ciclosAlarme = ciclos.filter((c) => c.estado === "alarme").length;
 
-  const openOP = (item: OrdemProducao | null, zonaId: string) => setOPForm({ open: true, zona: zonaId, item });
   const openCiclo = (item: EquipamentoCiclo | null, zonaId: string) => {
     setCicloForm({ open: true, zona: zonaId, item });
   };
-  const openTeam = (zonaId: string) => setEquipaForm({ open: true, zona: zonaId });
-
-  const moveOP = useCallback((opId: string, novaZonaId: string) => {
-    patchOp(opId, { zona_id: novaZonaId as OrdemProducao["zona_id"] });
-    toast.success("OP movida");
-    supabase.from("ordens_producao").update({ zona_id: novaZonaId }).eq("id", opId)
-      .then(({ error }) => { if (error) toast.error("Erro ao mover OP"); });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const moveCiclo = useCallback((cicloId: string, novaZonaId: string) => {
     patchCiclo(cicloId, { zona_id: novaZonaId as EquipamentoCiclo["zona_id"] });
@@ -133,6 +141,30 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
         <ClockDisplay />
       </header>
 
+      {/* Barra semana — exibição (Seg → Sex) */}
+      <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-6 py-1.5">
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Semana</span>
+        <span className="text-sm font-black text-slate-900">
+          {fmtDiaMes(weekDays[0])} — {fmtDiaMes(weekDays[4])}
+        </span>
+        <div className="ml-auto flex items-center gap-1">
+          {weekDays.map((d, i) => {
+            const hoje = isSameDay(d, new Date());
+            return (
+              <span
+                key={i}
+                className={cn(
+                  "rounded px-2 py-0.5 text-[11px] font-extrabold",
+                  hoje ? "bg-emerald-100 text-emerald-800" : "bg-white text-slate-600 border border-slate-200"
+                )}
+              >
+                {DIAS_SEMANA[i]} {fmtDiaMes(d)}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+
       {updateReminder.show && (
         <div className="flex items-center justify-between gap-4 bg-amber-500 px-6 py-2 text-white shadow-md">
           <div className="flex items-center gap-2 font-bold">
@@ -149,29 +181,35 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
       )}
 
       <div className="flex flex-1 min-h-0 flex-col gap-2 overflow-hidden p-3">
-        {/* Produção: 4 colunas — SL1 | SASC Picking | SL2 Linhas (Assembling+Termo) | Embalamento */}
+        {/* Produção: 4 colunas — SL1 (combinado) | SASC Picking | SL2 Linhas | SL2 Embalamento */}
         <div className="flex min-h-0 flex-[3] flex-col">
           <div className="mb-1 flex items-center justify-between">
             <div className="flex items-center gap-2">
               {porArea.sala_limpa_1 && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.sala_limpa_1)}>{AREA_LABEL.sala_limpa_1}</span>}
               {porArea.sala_limpa_2 && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.sala_limpa_2)}>{AREA_LABEL.sala_limpa_2}</span>}
-              {porArea.embalamento && <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.embalamento)}>{AREA_LABEL.embalamento}</span>}
             </div>
           </div>
-          <div className="grid min-h-0 flex-1 grid-cols-4 gap-2">
-            {/* SL1 */}
-            {(porArea.sala_limpa_1 ?? []).map((z) => (
-              <CardZona
-                key={z.id}
-                zona={z}
-                ordens={opsPorZona[z.id] ?? []}
-                funcionarios={funcionarios}
-                onOpenOP={openOP}
-                onOpenTeam={openTeam}
-                onMoveOP={moveOP}
-                kiosk={kiosk}
-              />
-            ))}
+          <div className="grid min-h-0 flex-1 grid-cols-4 grid-rows-1 gap-2 overflow-hidden">
+            {/* SL1 combinado — todas as 5 sub-zonas num card só, com sticker da sub-zona por OP */}
+            {(() => {
+              const sl1 = porArea.sala_limpa_1 ?? [];
+              const principal = sl1[0];
+              const extra = sl1.slice(1);
+              if (!principal) return null;
+              const ordensSl1 = sl1.flatMap((z) => opsPorZona[z.id] ?? []);
+              return (
+                <CardZona
+                  key="sl1-combinado"
+                  zona={{ ...principal, nome: "SL1", responsavel: principal.responsavel }}
+                  zonasExtra={extra}
+                  ordens={ordensSl1}
+                  funcionarios={funcionarios}
+                  readOnly
+                  kiosk={kiosk}
+                  showLinhaBadge
+                />
+              );
+            })()}
             {/* SASC Picking */}
             {(porArea.sala_limpa_2 ?? []).filter((z) => z.tipo === "picking").map((z) => (
               <CardZona
@@ -179,9 +217,7 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
                 zona={z}
                 ordens={opsPorZona[z.id] ?? []}
                 funcionarios={funcionarios}
-                onOpenOP={openOP}
-                onOpenTeam={openTeam}
-                onMoveOP={moveOP}
+                readOnly
                 kiosk={kiosk}
               />
             ))}
@@ -199,24 +235,20 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
                   zonasExtra={extra}
                   ordens={ordensLinhas}
                   funcionarios={funcionarios}
-                  onOpenOP={openOP}
-                  onOpenTeam={openTeam}
-                  onMoveOP={moveOP}
+                  readOnly
                   kiosk={kiosk}
                   showLinhaBadge
                 />
               );
             })()}
-            {/* Embalamento */}
-            {(porArea.embalamento ?? []).map((z) => (
+            {/* SL2 Embalamento */}
+            {(porArea.sala_limpa_2 ?? []).filter((z) => z.id === "sl2_embalamento").map((z) => (
               <CardZona
                 key={z.id}
                 zona={z}
                 ordens={opsPorZona[z.id] ?? []}
                 funcionarios={funcionarios}
-                onOpenOP={openOP}
-                onOpenTeam={openTeam}
-                onMoveOP={moveOP}
+                readOnly
                 kiosk={kiosk}
               />
             ))}
@@ -226,14 +258,8 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
         {/* Esterilização: 5 câmaras — mais curto */}
         {porArea.esterilizacao && (
           <div className="flex min-h-0 flex-[1] flex-col">
-            <div className="mb-1 flex items-center justify-between">
+            <div className="mb-1 flex items-center">
               <span className={cn("rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR.esterilizacao)}>{AREA_LABEL.esterilizacao}</span>
-              <button
-                onClick={() => openCiclo(null, porArea.esterilizacao![0].id)}
-                className="rounded-md bg-slate-900 px-3 py-1 text-xs font-bold text-white shadow-sm transition-colors hover:bg-slate-700"
-              >
-                + Carregar Ciclo
-              </button>
             </div>
             <div className="grid min-h-0 flex-1 grid-cols-5 gap-2">
               {porArea.esterilizacao.map((z) => (
@@ -241,7 +267,6 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
                   key={z.id}
                   zona={z}
                   ciclo={cicloPorZona[z.id]}
-                  onOpenCiclo={openCiclo}
                   onMoveCiclo={moveCiclo}
                   kiosk={kiosk}
                 />
@@ -251,15 +276,6 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
         )}
       </div>
 
-      {opForm.open && (
-        <FormOP
-          open={opForm.open}
-          onOpenChange={(o) => setOPForm((s) => ({ ...s, open: o }))}
-          editItem={opForm.item}
-          defaultZona={opForm.zona}
-          painelMode={!!opForm.item}
-        />
-      )}
       {cicloForm.open && (
         <FormCiclo
           open={cicloForm.open}
@@ -268,19 +284,18 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
           zonaId={cicloForm.zona}
         />
       )}
-      {equipaForm.open && (
-        <FormEquipa
-          open={equipaForm.open}
-          onOpenChange={(o) => setEquipaForm((s) => ({ ...s, open: o }))}
-          zonaId={equipaForm.zona}
-          funcionarios={funcionarios}
-          responsavel={zonas.find((z) => z.id === equipaForm.zona)?.responsavel}
-        />
-      )}
     </div>
   );
 }
 
+
+const DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex"];
+function fmtDiaMes(d: Date) {
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
 
 function Stat({ label, value, color, flash }: { label: string; value: number; color: "emerald" | "red" | "slate"; flash?: boolean }) {
   const cls =

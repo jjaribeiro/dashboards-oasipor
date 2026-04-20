@@ -5,7 +5,10 @@ import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { cn, computePrioridadeEfetiva } from "@/lib/utils";
 import { FormPedido } from "./planeamento-pedidos";
+import { SubmeterSemanaDialog } from "./submeter-semana-dialog";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PRIORIDADE_OP_COR, PRIORIDADE_OP_LABEL } from "@/lib/constants";
+import { rotaParaPedido } from "@/lib/producao-rota";
 import type { PedidoProducao, PrioridadeOP, MetaCategoria, CategoriaMeta } from "@/lib/types";
 
 const DIAS_LABEL = ["Seg", "Ter", "Qua", "Qui", "Sex"];
@@ -28,6 +31,11 @@ function fmtDate(d: Date) {
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
+function startOfDayLocal(d: Date) {
+  const r = new Date(d);
+  r.setHours(0, 0, 0, 0);
+  return r;
+}
 function priorityRank(p: PrioridadeOP): number {
   const map: Record<string, number> = { urgente: 4, alta: 3, normal: 2, baixa: 1, por_definir: 0 };
   return map[p] ?? 0;
@@ -44,18 +52,6 @@ function zonaDoTipo(p: PedidoProducao): "sl1" | "sl2" {
   return temNE ? "sl1" : "sl2";
 }
 
-// Zona inicial da OP para um pedido (1 OP por pedido).
-// A OP avança entre zonas à medida que a produção progride.
-// Campo NE → SL1. Campo sem NE → SL2 Termo.
-// Pack/Trouxa (manual ou termo) → SASC Picking.
-function zonaInicialParaPedido(p: PedidoProducao): string {
-  const eCampo = p.categoria === "campo" || p.tipo_linha === "campos" || (p.produto_nome ?? "").toLowerCase().includes("campo");
-  if (eCampo) {
-    const temNE = /\bNE\b/.test(`${p.produto_nome ?? ""} ${p.produto_codigo ?? ""}`.toUpperCase());
-    return temNE ? "sl1" : "sl2_termo";
-  }
-  return "sl2_picking";
-}
 const ZONAS: Array<{ id: "sl1" | "sl2"; label: string; categoria: CategoriaMeta; flex: number }> = [
   { id: "sl1", label: "SL1", categoria: "campos_cirurgicos", flex: 1 },
   { id: "sl2", label: "SL2", categoria: "packs_trouxas", flex: 3 },
@@ -80,10 +76,15 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
   const prioEf = (id: string, fallback: PrioridadeOP): PrioridadeOP =>
     (prioridadeEfetiva.get(id) ?? fallback) as PrioridadeOP;
   const [filtroPrio, setFiltroPrio] = useState<string>("");
+  const [searchAgendar, setSearchAgendar] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   // dropTarget: "inbox" ou "sl1__0" (zona__diaIdx) ou número (dia idx — para retrocompat)
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [viewPedido, setViewPedido] = useState<PedidoProducao | null>(null);
+  const [submeterOpen, setSubmeterOpen] = useState(false);
+  const [pedidosParaSubmeter, setPedidosParaSubmeter] = useState<PedidoProducao[]>([]);
+  const [confirmAnular, setConfirmAnular] = useState<PedidoProducao[] | null>(null);
+  const [confirmLimpar, setConfirmLimpar] = useState<PedidoProducao[] | null>(null);
 
   const { weekStart, days } = useMemo(() => {
     const base = addDays(startOfWeekMonday(new Date()), semanaOffset * 7);
@@ -92,18 +93,43 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
   }, [semanaOffset]);
 
   // Pedidos sem dia (para agendar) — filtra só os ainda por programar/pendentes
-  const porAgendar = useMemo(() =>
-    pedidos
+  const porAgendar = useMemo(() => {
+    const q = searchAgendar.trim().toLowerCase();
+    return pedidos
       .filter((p) => {
         if (p.estado === "concluido" || p.estado === "cancelado") return false;
         if (p.data_agendada) return false;
         if (filtroPrio && p.prioridade !== filtroPrio) return false;
+        if (q) {
+          const haystack = [
+            p.produto_nome,
+            p.produto_codigo,
+            p.numero,
+            p.cliente,
+            p.comercial,
+            p.ficha_producao,
+          ].filter(Boolean).join(" ").toLowerCase();
+          if (!haystack.includes(q)) return false;
+        }
         return true;
       })
-      .sort((a, b) => priorityRank(prioEf(b.id, b.prioridade)) - priorityRank(prioEf(a.id, a.prioridade))),
-  [pedidos, filtroPrio]);
+      .sort((a, b) => priorityRank(prioEf(b.id, b.prioridade)) - priorityRank(prioEf(a.id, a.prioridade)));
+  }, [pedidos, filtroPrio, searchAgendar, prioEf]);
 
-  // Pedidos já agendados agrupados por (zona, dia) na semana actual
+  // Calcula em quantos dias da semana actual o pedido está agendado (start + fim opcional)
+  function diasOcupadosNaSemana(p: PedidoProducao): number[] {
+    if (!p.data_agendada) return [];
+    const inicio = startOfDayLocal(new Date(p.data_agendada)).getTime();
+    const fim = startOfDayLocal(new Date(p.data_fim_agendada ?? p.data_agendada)).getTime();
+    const idxs: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const d = startOfDayLocal(days[i]).getTime();
+      if (d >= inicio && d <= fim) idxs.push(i);
+    }
+    return idxs;
+  }
+
+  // Pedidos já agendados agrupados por (zona, dia) — start day apenas (cartão "principal")
   const agendadosPorZonaDia = useMemo(() => {
     const map = new Map<string, PedidoProducao[]>();
     for (const z of ZONAS) for (let i = 0; i < 5; i++) map.set(`${z.id}__${i}`, []);
@@ -125,20 +151,54 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
     return map;
   }, [pedidos, days]);
 
-  // Totais por zona, dia, e agregados
+  // Continuações: dias ocupados que NÃO correspondem ao dia inicial (data_agendada)
+  // Inclui o caso de o pedido ter começado em semana anterior — todos os dias desta semana são continuação
+  const continuacoesPorZonaDia = useMemo(() => {
+    const map = new Map<string, PedidoProducao[]>();
+    for (const z of ZONAS) for (let i = 0; i < 5; i++) map.set(`${z.id}__${i}`, []);
+    for (const p of pedidos) {
+      if (!p.data_agendada || !p.data_fim_agendada) continue;
+      if (p.estado === "concluido" || p.estado === "cancelado") continue;
+      const zona = zonaDoTipo(p);
+      const idxs = diasOcupadosNaSemana(p);
+      const inicioMs = startOfDayLocal(new Date(p.data_agendada)).getTime();
+      for (const i of idxs) {
+        const dMs = startOfDayLocal(days[i]).getTime();
+        if (dMs !== inicioMs) {
+          map.get(`${zona}__${i}`)!.push(p);
+        }
+      }
+    }
+    return map;
+  }, [pedidos, days]);
+
+  // Totais por zona, dia — separados por tipo (campos vs packs/trouxas)
   const totaisPorZonaDia = useMemo(() => {
-    const r: Record<string, number> = {};
-    for (const z of ZONAS) for (let i = 0; i < 5; i++) {
-      const key = `${z.id}__${i}`;
-      r[key] = (agendadosPorZonaDia.get(key) ?? []).reduce((acc, p) => acc + p.quantidade_alvo, 0);
+    const r: Record<string, { campos: number; packs: number }> = {};
+    for (const z of ZONAS) for (let i = 0; i < 5; i++) r[`${z.id}__${i}`] = { campos: 0, packs: 0 };
+    for (const p of pedidos) {
+      if (!p.data_agendada) continue;
+      if (p.estado === "concluido" || p.estado === "cancelado") continue;
+      const zona = zonaDoTipo(p);
+      const idxs = diasOcupadosNaSemana(p);
+      if (idxs.length === 0) continue;
+      const qtdPorDia = Math.round(p.quantidade_alvo / idxs.length);
+      const eCampo = p.categoria === "campo" || p.tipo_linha === "campos" || (p.produto_nome ?? "").toLowerCase().includes("campo");
+      for (const i of idxs) {
+        if (eCampo) r[`${zona}__${i}`].campos += qtdPorDia;
+        else r[`${zona}__${i}`].packs += qtdPorDia;
+      }
     }
     return r;
-  }, [agendadosPorZonaDia]);
+  }, [pedidos, days]);
 
   const totaisPorDia = useMemo(() => {
     const r = new Array(5).fill(0);
     for (let i = 0; i < 5; i++) {
-      for (const z of ZONAS) r[i] += totaisPorZonaDia[`${z.id}__${i}`] ?? 0;
+      for (const z of ZONAS) {
+        const t = totaisPorZonaDia[`${z.id}__${i}`];
+        r[i] += (t?.campos ?? 0) + (t?.packs ?? 0);
+      }
     }
     return r;
   }, [totaisPorZonaDia]);
@@ -196,8 +256,8 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
     // respeitando meta diária em un por zona (SL1 = campos, SL2 = packs).
     const fila = [...porAgendar].sort((a, b) => priorityRank(prioEf(b.id, b.prioridade)) - priorityRank(prioEf(a.id, a.prioridade)));
     const ocupados: Record<"sl1" | "sl2", number[]> = {
-      sl1: [0, 1, 2, 3, 4].map((i) => totaisPorZonaDia[`sl1__${i}`] ?? 0),
-      sl2: [0, 1, 2, 3, 4].map((i) => totaisPorZonaDia[`sl2__${i}`] ?? 0),
+      sl1: [0, 1, 2, 3, 4].map((i) => { const t = totaisPorZonaDia[`sl1__${i}`]; return (t?.campos ?? 0) + (t?.packs ?? 0); }),
+      sl2: [0, 1, 2, 3, 4].map((i) => { const t = totaisPorZonaDia[`sl2__${i}`]; return (t?.campos ?? 0) + (t?.packs ?? 0); }),
     };
     const atribuicoes: Array<{ pedido: PedidoProducao; diaIdx: number }> = [];
 
@@ -235,24 +295,54 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
     toast.success(`${count} pedidos agendados automaticamente`);
   }
 
-  async function submeterSemana() {
+  function abrirSubmeterSemana() {
     const agendados: PedidoProducao[] = [];
     for (const z of ZONAS) for (let i = 0; i < 5; i++) {
       for (const p of agendadosPorZonaDia.get(`${z.id}__${i}`) ?? []) agendados.push(p);
     }
-    // Ignora pedidos que já estão em produção (já foram submetidos)
     const novos = agendados.filter((p) => p.estado !== "em_producao" && p.estado !== "concluido" && p.estado !== "cancelado");
     if (novos.length === 0) { toast.info?.("Nada para submeter — semana já em produção"); return; }
-    if (!confirm(`Submeter ${novos.length} pedido${novos.length === 1 ? "" : "s"} para produção? Vai criar OPs nas zonas da rota de cada pedido.`)) return;
+    setPedidosParaSubmeter(novos);
+    setSubmeterOpen(true);
+  }
+
+  async function confirmarSubmeterSemana(rotulagemIds: Set<string>) {
+    // Idempotente: pular pedidos que já têm OP criada
+    const idsNovos = pedidosParaSubmeter.map((p) => p.id);
+    const { data: jaTem } = await supabase
+      .from("ordens_producao")
+      .select("pedido_id")
+      .in("pedido_id", idsNovos);
+    const jaSubmetidos = new Set((jaTem ?? []).map((r) => r.pedido_id as string));
+    const aCriar = pedidosParaSubmeter.filter((p) => !jaSubmetidos.has(p.id));
+    if (aCriar.length === 0) {
+      toast.info?.("Todos os pedidos já têm OP criada");
+      setSubmeterOpen(false);
+      return;
+    }
+
+    // Actualizar a flag precisa_rotulagem em todos os pedidos a submeter
+    for (const p of pedidosParaSubmeter) {
+      const precisa = rotulagemIds.has(p.id);
+      if (precisa !== p.precisa_rotulagem) {
+        await supabase.from("pedidos_producao").update({ precisa_rotulagem: precisa }).eq("id", p.id);
+      }
+    }
 
     let opsCriadas = 0;
     let pedidosOk = 0;
-    for (const p of novos) {
+    for (const p of aCriar) {
       const inicio = p.data_agendada ? new Date(p.data_agendada).toISOString() : null;
-      const payload = {
+      // Fim previsto da OP = fim agendado no planeamento (default: mesmo dia do início).
+      // Deadline do cliente está em pedidos_producao.fim_previsto e não é copiada para a OP.
+      const fimPlaneamento = p.data_fim_agendada
+        ? new Date(p.data_fim_agendada).toISOString()
+        : inicio;
+      const payload: Record<string, unknown> = {
         pedido_id: p.id,
-        numero: p.numero,
-        zona_id: zonaInicialParaPedido(p),
+        // Nº OP é atribuído manualmente mais tarde — não herda do pedido (PP)
+        numero: null,
+        zona_id: rotaParaPedido(p)[0], // zona inicial — operador transfere para a próxima
         produto_id: p.produto_id,
         produto_codigo: p.produto_codigo,
         produto_nome: p.produto_nome,
@@ -264,33 +354,118 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
         estado: "planeada",
         prioridade: prioEf(p.id, p.prioridade),
         inicio_previsto: inicio,
-        fim_previsto: p.fim_previsto,
+        fim_previsto: fimPlaneamento,
         ordem_fila: 1,
       };
       const { error } = await supabase.from("ordens_producao").insert(payload);
       if (error) { toast.error(`Erro a criar OP de ${p.produto_nome}: ${error.message}`); continue; }
       opsCriadas++;
-      const { error: e2 } = await supabase.from("pedidos_producao").update({ estado: "em_producao" }).eq("id", p.id);
-      if (!e2) pedidosOk++;
+      pedidosOk++;
+      // Estado mantém-se "programado". Passa a "em_producao" quando operador iniciar a OP (trigger DB).
     }
-    toast.success(`${pedidosOk} pedidos submetidos · ${opsCriadas} OPs criadas`);
+    toast.success(`${pedidosOk} pedidos submetidos · ${opsCriadas} OPs criadas · ${rotulagemIds.size} para rotulagem`);
+    setSubmeterOpen(false);
   }
 
-  async function limparSemana() {
-    if (!confirm("Desagendar todos os pedidos desta semana?")) return;
+  async function abrirAnularSubmissao() {
+    const { data: opsRelacionadas, error: err1 } = await supabase
+      .from("ordens_producao")
+      .select("id, pedido_id, estado, inicio, quantidade_atual")
+      .not("pedido_id", "is", null);
+    if (err1) { toast.error("Erro a verificar OPs"); return; }
+    const opsPorPedido = new Map<string, typeof opsRelacionadas>();
+    for (const op of opsRelacionadas ?? []) {
+      if (!op.pedido_id) continue;
+      const arr = opsPorPedido.get(op.pedido_id) ?? [];
+      arr.push(op);
+      opsPorPedido.set(op.pedido_id, arr);
+    }
+    const candidatos: PedidoProducao[] = [];
+    for (const z of ZONAS) for (let i = 0; i < 5; i++) {
+      for (const p of agendadosPorZonaDia.get(`${z.id}__${i}`) ?? []) {
+        if (p.estado !== "em_producao" && p.estado !== "programado") continue;
+        const ops = opsPorPedido.get(p.id) ?? [];
+        if (ops.length === 0) continue;
+        const tocaram = ops.some((o) => o.estado !== "planeada" || (o.quantidade_atual ?? 0) > 0 || o.inicio !== null);
+        if (!tocaram) candidatos.push(p);
+      }
+    }
+    if (candidatos.length === 0) { toast.info?.("Nenhum pedido desta semana pode ser anulado"); return; }
+    setConfirmAnular(candidatos);
+  }
+
+  async function confirmarAnularSubmissao() {
+    const candidatos = confirmAnular ?? [];
+    let ok = 0;
+    for (const p of candidatos) {
+      const { error: eDel } = await supabase.from("ordens_producao").delete().eq("pedido_id", p.id);
+      if (eDel) { toast.error(`Erro a apagar OPs de ${p.produto_nome}`); continue; }
+      const { error: eUpd } = await supabase.from("pedidos_producao").update({ estado: "programado" }).eq("id", p.id);
+      if (!eUpd) ok++;
+    }
+    toast.success(`${ok} pedidos anulados`);
+    setConfirmAnular(null);
+  }
+
+  function abrirLimparSemana() {
     const todos: PedidoProducao[] = [];
     for (const z of ZONAS) for (let i = 0; i < 5; i++) {
       for (const p of agendadosPorZonaDia.get(`${z.id}__${i}`) ?? []) todos.push(p);
     }
     if (todos.length === 0) { toast.info?.("Semana já vazia"); return; }
-    let count = 0;
-    for (const p of todos) {
-      const update: Record<string, unknown> = { data_agendada: null };
-      if (p.estado === "programado") update.estado = "pendente";
-      const { error } = await supabase.from("pedidos_producao").update(update).eq("id", p.id);
-      if (!error) count++;
+    setConfirmLimpar(todos);
+  }
+
+  async function confirmarLimparSemana() {
+    const todos = confirmLimpar ?? [];
+    if (todos.length === 0) { setConfirmLimpar(null); return; }
+
+    // Ir buscar todas as OPs dos pedidos a limpar para saber o que pode ser apagado
+    const pedidoIds = todos.map((p) => p.id);
+    const { data: opsLigadas, error: errOps } = await supabase
+      .from("ordens_producao")
+      .select("id, pedido_id, estado, inicio, quantidade_atual")
+      .in("pedido_id", pedidoIds);
+    if (errOps) { toast.error("Erro a verificar OPs"); return; }
+
+    // OPs tocadas (já iniciadas) — não podem ser apagadas
+    const tocadas = new Set<string>();
+    const tocadasPorPedido = new Map<string, number>();
+    for (const op of opsLigadas ?? []) {
+      const iniciou = op.estado !== "planeada" || op.inicio !== null || (op.quantidade_atual ?? 0) > 0;
+      if (iniciou) {
+        tocadas.add(op.id);
+        if (op.pedido_id) tocadasPorPedido.set(op.pedido_id, (tocadasPorPedido.get(op.pedido_id) ?? 0) + 1);
+      }
     }
-    toast.success(`${count} pedidos desagendados`);
+
+    // Apagar as OPs que ainda não foram iniciadas (estão só planeadas)
+    const idsParaApagar = (opsLigadas ?? []).filter((o) => !tocadas.has(o.id)).map((o) => o.id);
+    let opsApagadas = 0;
+    if (idsParaApagar.length > 0) {
+      const { error: errDel } = await supabase.from("ordens_producao").delete().in("id", idsParaApagar);
+      if (errDel) toast.error(`Erro a apagar OPs: ${errDel.message}`);
+      else opsApagadas = idsParaApagar.length;
+    }
+
+    // Desagendar pedidos; os que têm OPs tocadas mantêm estado (continuam em produção)
+    let desagendados = 0;
+    let mantidos = 0;
+    for (const p of todos) {
+      const temTocadas = (tocadasPorPedido.get(p.id) ?? 0) > 0;
+      const update: Record<string, unknown> = { data_agendada: null, data_fim_agendada: null };
+      if (!temTocadas && p.estado === "programado") update.estado = "pendente";
+      if (temTocadas) mantidos++;
+      const { error } = await supabase.from("pedidos_producao").update(update).eq("id", p.id);
+      if (!error && !temTocadas) desagendados++;
+    }
+
+    const partes: string[] = [];
+    if (desagendados > 0) partes.push(`${desagendados} desagendado${desagendados === 1 ? "" : "s"}`);
+    if (opsApagadas > 0) partes.push(`${opsApagadas} OP${opsApagadas === 1 ? "" : "s"} apagada${opsApagadas === 1 ? "" : "s"}`);
+    if (mantidos > 0) partes.push(`${mantidos} mantido${mantidos === 1 ? "" : "s"} (em produção)`);
+    toast.success(partes.join(" · ") || "Semana limpa");
+    setConfirmLimpar(null);
   }
 
   return (
@@ -334,17 +509,24 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
             </span>
           </div>
           <button
-            onClick={sugerirAuto}
-            className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-extrabold text-white shadow-sm hover:bg-sky-700"
-            title="Distribui os pedidos por agendar nos dias, respeitando meta e prioridade"
+            disabled
+            aria-disabled="true"
+            tabIndex={-1}
+            className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-extrabold text-white shadow-sm opacity-30 cursor-not-allowed"
+            title="Em breve"
           >✨ Sugerir auto</button>
           <button
-            onClick={submeterSemana}
+            onClick={abrirSubmeterSemana}
             className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700"
             title="Cria as OPs para cada pedido agendado e envia para os painéis de produção"
           >✓ Submeter semana</button>
           <button
-            onClick={limparSemana}
+            onClick={abrirAnularSubmissao}
+            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-bold text-amber-700 hover:bg-amber-100"
+            title="Apaga as OPs criadas para pedidos que ainda não foram iniciados e repõe-nos em programado"
+          >↶ Anular submissão</button>
+          <button
+            onClick={abrirLimparSemana}
             className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-bold text-red-700 hover:bg-red-100"
           >Limpar semana</button>
         </div>
@@ -361,19 +543,40 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
           onDragOver={(e) => onDragOver(e, "inbox")}
           onDrop={onDropInbox}
         >
-          <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
-            <div>
-              <h3 className="text-sm font-black text-slate-900">Por agendar</h3>
-              <p className="text-[10px] font-bold text-slate-500">{totalPorAgendar} pedidos</p>
+          <div className="space-y-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-slate-900">Por agendar</h3>
+                <p className="text-[10px] font-bold text-slate-500">{totalPorAgendar} pedidos{searchAgendar && ` (filtrado)`}</p>
+              </div>
+              <select
+                value={filtroPrio}
+                onChange={(e) => setFiltroPrio(e.target.value)}
+                className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold text-slate-700"
+              >
+                <option value="">Todas prio.</option>
+                {Object.entries(PRIORIDADE_OP_LABEL).map(([id, l]) => <option key={id} value={id}>{l}</option>)}
+              </select>
             </div>
-            <select
-              value={filtroPrio}
-              onChange={(e) => setFiltroPrio(e.target.value)}
-              className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold text-slate-700"
-            >
-              <option value="">Todas prio.</option>
-              {Object.entries(PRIORIDADE_OP_LABEL).map(([id, l]) => <option key={id} value={id}>{l}</option>)}
-            </select>
+            <div className="relative">
+              <input
+                type="search"
+                value={searchAgendar}
+                onChange={(e) => setSearchAgendar(e.target.value)}
+                placeholder="Pesquisar produto, ref, cliente, comercial…"
+                className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 pl-7 text-xs font-bold text-slate-700 placeholder:font-normal placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-200"
+              />
+              <svg className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              {searchAgendar && (
+                <button
+                  onClick={() => setSearchAgendar("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-extrabold text-slate-400 hover:text-slate-700"
+                  title="Limpar"
+                >×</button>
+              )}
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
             {porAgendar.map((p) => (
@@ -432,12 +635,11 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
                 {days.map((d, i) => {
                   const cellKey = `${zona.id}__${i}`;
                   const lista = agendadosPorZonaDia.get(cellKey) ?? [];
-                  const total = totaisPorZonaDia[cellKey] ?? 0;
-                  const meta = metaPorZona[zona.id];
-                  const pct = meta > 0 ? Math.min(100, (total / meta) * 100) : 0;
-                  const excede = meta > 0 && total > meta;
+                  const continuacoes = continuacoesPorZonaDia.get(cellKey) ?? [];
+                  const tot = totaisPorZonaDia[cellKey] ?? { campos: 0, packs: 0 };
                   const isDropTarget = dropTarget === cellKey;
                   const isHoje = isSameDay(d, new Date());
+                  const totalPedidosNaCelula = lista.length + continuacoes.length;
                   return (
                     <div
                       key={i}
@@ -449,36 +651,60 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
                         isDropTarget && "bg-sky-100",
                       )}
                     >
-                      {meta > 0 && (
+                      {(totalPedidosNaCelula > 0 || tot.campos > 0 || tot.packs > 0) && (
                         <div className="sticky top-0 z-[1] -mx-1.5 -mt-1.5 mb-0.5 border-b border-slate-200 bg-white/80 px-1.5 pt-1 pb-1 backdrop-blur">
-                          <div className="flex items-center justify-between text-[9px] font-bold">
-                            <span className="text-slate-400">{lista.length > 0 ? `${lista.length} ${lista.length === 1 ? "pedido" : "pedidos"}` : ""}</span>
-                            <span className={cn(excede ? "text-red-700" : "text-slate-600")}>
-                              {total}/{meta}
+                          <div className="flex items-center justify-between gap-1 text-[10px] font-extrabold">
+                            <span className="text-slate-400">
+                              {totalPedidosNaCelula > 0 ? `${totalPedidosNaCelula} ${totalPedidosNaCelula === 1 ? "ped" : "peds"}` : ""}
                             </span>
-                          </div>
-                          <div className="mt-0.5 h-0.5 w-full overflow-hidden rounded-full bg-slate-200">
-                            <div
-                              className={cn("h-full", excede ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-emerald-500")}
-                              style={{ width: `${pct}%` }}
-                            />
+                            <span className="flex items-center gap-1.5">
+                              {tot.campos > 0 && (
+                                <span className="rounded bg-emerald-100 px-1 py-0.5 text-emerald-700" title="Campos">C {tot.campos}</span>
+                              )}
+                              {tot.packs > 0 && (
+                                <span className="rounded bg-sky-100 px-1 py-0.5 text-sky-700" title="Packs / Trouxas">P {tot.packs}</span>
+                              )}
+                            </span>
                           </div>
                         </div>
                       )}
-                      {lista.map((p) => (
-                        <PedidoCard
-                          key={p.id}
-                          pedido={p}
-                          prioridadeEfetiva={prioEf(p.id, p.prioridade)}
-                          draggable
-                          onDragStart={() => onDragStart(p.id)}
-                          onDragEnd={onDragEnd}
-                          dragging={dragId === p.id}
-                          onRemove={() => movePedido(p.id, "inbox")}
-                          compact
-                          onClick={() => setViewPedido(p)}
-                        />
-                      ))}
+                      {lista.map((p) => {
+                        const idxs = diasOcupadosNaSemana(p);
+                        const totalDias = idxs.length;
+                        const qtdPorDia = totalDias > 0 ? Math.round(p.quantidade_alvo / totalDias) : p.quantidade_alvo;
+                        return (
+                          <PedidoCard
+                            key={p.id}
+                            pedido={p}
+                            prioridadeEfetiva={prioEf(p.id, p.prioridade)}
+                            draggable
+                            onDragStart={() => onDragStart(p.id)}
+                            onDragEnd={onDragEnd}
+                            dragging={dragId === p.id}
+                            onRemove={() => movePedido(p.id, "inbox")}
+                            compact
+                            onClick={() => setViewPedido(p)}
+                            spanDias={totalDias > 1 ? totalDias : undefined}
+                            qtyDoDia={totalDias > 1 ? qtdPorDia : undefined}
+                          />
+                        );
+                      })}
+                      {continuacoes.map((p) => {
+                        const idxs = diasOcupadosNaSemana(p);
+                        const qtdPorDia = idxs.length > 0 ? Math.round(p.quantidade_alvo / idxs.length) : 0;
+                        return (
+                          <button
+                            key={`cont-${p.id}`}
+                            onClick={() => setViewPedido(p)}
+                            className="flex w-full items-center gap-1.5 rounded border border-dashed border-slate-300 bg-slate-50 px-2 py-1 text-left text-[10px] font-bold text-slate-500 hover:border-sky-400 hover:bg-sky-50"
+                            title={`Continuação de ${p.produto_nome}`}
+                          >
+                            <span className="text-slate-400">↳</span>
+                            <span className="truncate">{p.produto_nome}</span>
+                            <span className="ml-auto rounded bg-slate-200 px-1 py-0.5 text-[9px] font-extrabold text-slate-700">{qtdPorDia} un</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   );
                 })}
@@ -491,16 +717,50 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
       {viewPedido && (
         <FormPedido
           open
-          readOnly
           editItem={viewPedido}
           onClose={() => setViewPedido(null)}
+        />
+      )}
+
+      <SubmeterSemanaDialog
+        open={submeterOpen}
+        pedidos={pedidosParaSubmeter}
+        onClose={() => setSubmeterOpen(false)}
+        onConfirm={confirmarSubmeterSemana}
+      />
+
+      {confirmAnular && (
+        <ConfirmDialog
+          title="Anular submissão?"
+          message={`${confirmAnular.length} pedido${confirmAnular.length === 1 ? "" : "s"} vão voltar a "programado"`}
+          detail={
+            <p>Apaga as OPs criadas para pedidos que <b>ainda não foram iniciados</b>. Pedidos com OP em curso ou com progresso não são afectados.</p>
+          }
+          confirmLabel="Anular"
+          variant="warning"
+          onCancel={() => setConfirmAnular(null)}
+          onConfirm={confirmarAnularSubmissao}
+        />
+      )}
+
+      {confirmLimpar && (
+        <ConfirmDialog
+          title="Limpar semana?"
+          message={`Desagendar ${confirmLimpar.length} pedido${confirmLimpar.length === 1 ? "" : "s"}`}
+          detail={
+            <p>Os pedidos voltam para "Por agendar" sem perder informação. Esta acção <b>não apaga OPs</b> já criadas.</p>
+          }
+          confirmLabel="Limpar"
+          variant="danger"
+          onCancel={() => setConfirmLimpar(null)}
+          onConfirm={confirmarLimparSemana}
         />
       )}
     </div>
   );
 }
 
-function PedidoCard({ pedido, draggable, onDragStart, onDragEnd, dragging, onRemove, compact, showStockCp, prioridadeEfetiva, onClick }: {
+function PedidoCard({ pedido, draggable, onDragStart, onDragEnd, dragging, onRemove, compact, showStockCp, prioridadeEfetiva, onClick, spanDias, qtyDoDia }: {
   pedido: PedidoProducao;
   draggable?: boolean;
   onDragStart?: () => void;
@@ -511,6 +771,8 @@ function PedidoCard({ pedido, draggable, onDragStart, onDragEnd, dragging, onRem
   showStockCp?: boolean;
   prioridadeEfetiva?: PrioridadeOP;
   onClick?: () => void;
+  spanDias?: number; // se >1, sinaliza que ocupa N dias
+  qtyDoDia?: number; // qty distribuída por dia
 }) {
   const prio = prioridadeEfetiva ?? pedido.prioridade;
   const prioAjustada = prioridadeEfetiva !== undefined && prioridadeEfetiva !== pedido.prioridade;
@@ -560,7 +822,13 @@ function PedidoCard({ pedido, draggable, onDragStart, onDragEnd, dragging, onRem
             <p className="truncate text-[10px] font-bold text-slate-500" title={pedido.cliente}>{pedido.cliente}</p>
           )}
           <div className="mt-0.5 flex items-center gap-2 text-[10px] font-bold flex-wrap">
-            <span className="rounded bg-slate-100 px-1 text-slate-700">{pedido.quantidade_alvo} un</span>
+            {spanDias && spanDias > 1 && qtyDoDia !== undefined ? (
+              <span className="rounded bg-sky-100 px-1 text-sky-700" title={`Total ${pedido.quantidade_alvo} un · ${spanDias} dias`}>
+                {qtyDoDia}/{pedido.quantidade_alvo} un · {spanDias}d
+              </span>
+            ) : (
+              <span className="rounded bg-slate-100 px-1 text-slate-700">{pedido.quantidade_alvo} un</span>
+            )}
             {pedido.tipo_linha && (() => {
               const label = pedido.tipo_linha === "termoformadora" ? "Termo"
                 : pedido.tipo_linha === "manual" ? "Manual"

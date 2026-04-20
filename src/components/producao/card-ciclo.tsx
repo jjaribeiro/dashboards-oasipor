@@ -136,7 +136,7 @@ export function CardCiclo({ zona, ciclo, onOpenCiclo, onMoveCiclo, kiosk }: Card
 
         {estado === "vazio" && (
           <div className="rounded-lg border border-dashed border-slate-200 p-3 text-center text-xs font-bold text-slate-400">
-            Carregar ciclo
+            Vazio · aguarda Planeamento EO
           </div>
         )}
 

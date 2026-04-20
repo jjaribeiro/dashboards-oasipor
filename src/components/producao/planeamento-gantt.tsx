@@ -53,23 +53,39 @@ export function GanttTab({ pedidos = [], ops, zonas }: { pedidos?: PedidoProduca
 
   const weekMs = 7 * 24 * 3600 * 1000;
 
+  // Map pedido por id (para enriquecer linha de OP com prio/comercial/stock e datas do planeamento)
+  const pedidoPorId = useMemo(() => {
+    const m = new Map<string, PedidoProducao>();
+    for (const p of pedidos) m.set(p.id, p);
+    return m;
+  }, [pedidos]);
+
   const opsDaSemana = useMemo(() => {
     const ordemZonas: Record<string, number> = {};
     zonas.forEach((z, i) => { ordemZonas[z.id] = i; });
     return ops
       .filter((o) => {
-        if (!o.inicio_previsto || !o.fim_previsto) return false;
-        const ini = new Date(o.inicio_previsto);
-        const fim = new Date(o.fim_previsto);
+        const ped = o.pedido_id ? pedidoPorId.get(o.pedido_id) : undefined;
+        const iniRaw = ped?.data_agendada ?? o.inicio_previsto;
+        const fimRaw = ped?.data_fim_agendada ?? ped?.data_agendada ?? o.fim_previsto;
+        if (!iniRaw || !fimRaw) return false;
+        const ini = new Date(iniRaw);
+        const fimDate = new Date(fimRaw);
+        // Adicionar +1 dia ao fim para incluir o próprio dia (data_fim_agendada é normalmente 11:00)
+        const fim = new Date(fimDate.getFullYear(), fimDate.getMonth(), fimDate.getDate() + 1);
         return ini < weekEnd && fim >= weekStart;
       })
       .sort((a, b) => {
         const oa = ordemZonas[a.zona_id] ?? 999;
         const ob = ordemZonas[b.zona_id] ?? 999;
         if (oa !== ob) return oa - ob;
-        return new Date(a.inicio_previsto!).getTime() - new Date(b.inicio_previsto!).getTime();
+        const aPed = a.pedido_id ? pedidoPorId.get(a.pedido_id) : undefined;
+        const bPed = b.pedido_id ? pedidoPorId.get(b.pedido_id) : undefined;
+        const aIni = new Date(aPed?.data_agendada ?? a.inicio_previsto ?? 0).getTime();
+        const bIni = new Date(bPed?.data_agendada ?? b.inicio_previsto ?? 0).getTime();
+        return aIni - bIni;
       });
-  }, [ops, weekStart, weekEnd, zonas]);
+  }, [ops, weekStart, weekEnd, zonas, pedidoPorId]);
 
   // Pedidos programados nesta semana (data_agendada cai entre weekStart e weekEnd)
   const pedidosDaSemana = useMemo(() =>
@@ -95,10 +111,19 @@ export function GanttTab({ pedidos = [], ops, zonas }: { pedidos?: PedidoProduca
   }
 
   function calcBar(op: OrdemProducao) {
-    const ini = new Date(op.inicio_previsto!);
-    const fim = new Date(op.fim_previsto!);
-    const startOffset = Math.max(0, ini.getTime() - weekStart.getTime());
-    const endOffset = Math.min(weekMs, fim.getTime() - weekStart.getTime());
+    // Preferir as datas do pedido (data_agendada/data_fim_agendada do planeamento) se existirem
+    const ped = op.pedido_id ? pedidoPorId.get(op.pedido_id) : undefined;
+    const iniRaw = ped?.data_agendada ?? op.inicio_previsto;
+    const fimRaw = ped?.data_fim_agendada ?? ped?.data_agendada ?? op.fim_previsto;
+    if (!iniRaw || !fimRaw) return { leftPct: 0, widthPct: 0 };
+    const dayMs = 24 * 3600 * 1000;
+    // Normalizar ao início do dia local (00:00) para a barra cobrir o dia inteiro
+    const iniDate = new Date(iniRaw);
+    const iniStart = new Date(iniDate.getFullYear(), iniDate.getMonth(), iniDate.getDate()).getTime();
+    const fimDate = new Date(fimRaw);
+    const fimEnd = new Date(fimDate.getFullYear(), fimDate.getMonth(), fimDate.getDate()).getTime() + dayMs;
+    const startOffset = Math.max(0, iniStart - weekStart.getTime());
+    const endOffset = Math.min(weekMs, Math.max(iniStart + dayMs, fimEnd) - weekStart.getTime());
     const leftPct = (startOffset / weekMs) * 100;
     const widthPct = Math.max(2, ((endOffset - startOffset) / weekMs) * 100);
     return { leftPct, widthPct };
@@ -175,85 +200,9 @@ export function GanttTab({ pedidos = [], ops, zonas }: { pedidos?: PedidoProduca
             />
           )}
 
-          {/* Secção: Pedidos Programados (sem OPs ainda — operadores vão puxar o trabalho) */}
-          {pedidosDaSemana.length > 0 && (
-            <>
-              <div className="grid border-b border-t border-slate-200 bg-sky-100" style={{ gridTemplateColumns: "460px 1fr" }}>
-                <div className="px-3 py-1 text-[10px] font-extrabold uppercase tracking-wide text-sky-800">
-                  📋 Pedidos Programados ({pedidosDaSemana.length})
-                </div>
-                <div />
-              </div>
-              {pedidosDaSemana.map((p) => {
-                const { leftPct, widthPct } = calcPedidoBar(p);
-                const tip = `${p.produto_codigo ?? ""} ${p.produto_nome} · Qty ${p.quantidade_alvo} · Agendado ${new Date(p.data_agendada!).toLocaleDateString("pt-PT")}${p.fim_previsto ? ` · Deadline ${new Date(p.fim_previsto).toLocaleDateString("pt-PT")}` : ""}`;
-                const noStock = p.stock_status === "pendente";
-                const tipoLabel = p.tipo_linha === "termoformadora" ? "T"
-                  : p.tipo_linha === "manual" ? "M"
-                  : p.tipo_linha === "stock" ? "S"
-                  : p.tipo_linha === "campos" ? "C"
-                  : null;
-                const prioLetter = p.prioridade === "urgente" ? "U" : p.prioridade === "alta" ? "A" : p.prioridade === "normal" ? "N" : p.prioridade === "baixa" ? "B" : "";
-                const prioCls = p.prioridade === "urgente" ? "bg-red-100 text-red-700"
-                  : p.prioridade === "alta" ? "bg-orange-100 text-orange-700"
-                  : p.prioridade === "normal" ? "bg-slate-100 text-slate-700"
-                  : p.prioridade === "baixa" ? "bg-emerald-100 text-emerald-700"
-                  : "bg-slate-50 text-slate-400";
-                const fullTip = `${p.numero ?? ""} ${p.produto_codigo ?? ""} ${p.produto_nome} · ${p.cliente ?? ""}${p.comercial ? " · 👤 " + p.comercial : ""} · ${p.quantidade_alvo} un${p.fim_previsto ? " · deadline " + new Date(p.fim_previsto).toLocaleDateString("pt-PT") : ""}${noStock ? " · ⚠ falta CP/MP" : ""}`;
-                return (
-                  <div key={p.id} className="grid flex-1 shrink-0 border-b border-slate-100 hover:bg-sky-50" style={{ gridTemplateColumns: "460px 1fr", minHeight: 44, maxHeight: 80 }}>
-                    <div className="flex flex-col justify-center border-r border-slate-200 px-2 py-0.5 leading-tight" title={fullTip}>
-                      <div className="flex min-w-0 items-center gap-1">
-                        {prioLetter && (
-                          <span className={cn("shrink-0 rounded px-1 text-[10px] font-extrabold", prioCls)} title={`Prio ${p.prioridade}`}>{prioLetter}</span>
-                        )}
-                        {p.numero && (
-                          <span className="shrink-0 rounded bg-slate-900 px-1 font-mono text-[10px] font-extrabold text-white">{p.numero}</span>
-                        )}
-                        {p.produto_codigo && (
-                          <span className="shrink-0 font-mono text-[10px] font-bold text-slate-500">{p.produto_codigo}</span>
-                        )}
-                        {tipoLabel && (
-                          <span className="shrink-0 rounded bg-slate-100 px-1 text-[10px] font-extrabold text-slate-700">{tipoLabel}</span>
-                        )}
-                        <span className="truncate text-xs font-extrabold text-slate-900">{p.produto_nome}</span>
-                      </div>
-                      <div className="flex min-w-0 items-center gap-1.5 text-[10px] font-bold text-slate-500">
-                        <span className="truncate">{p.cliente ?? "—"}</span>
-                        {p.fim_previsto && (
-                          <span className="shrink-0">· 📅 {new Date(p.fim_previsto).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit" })}</span>
-                        )}
-                        {p.comercial && (
-                          <span className="shrink-0 truncate text-indigo-600">· 👤 {p.comercial}</span>
-                        )}
-                        {noStock && <span className="shrink-0 rounded bg-amber-100 px-1 text-amber-700">⚠</span>}
-                      </div>
-                    </div>
-                    <div className="relative">
-                      <div className="absolute inset-0 grid grid-cols-7">
-                        {Array.from({ length: 7 }, (_, i) => (
-                          <div key={i} className={cn("border-r border-slate-100", i === 6 && "border-r-0")} />
-                        ))}
-                      </div>
-                      <div
-                        title={tip}
-                        className={cn("absolute rounded-md border-2 border-dashed shadow-sm", noStock ? "border-amber-500 bg-amber-100" : "border-sky-500 bg-sky-100")}
-                        style={{ left: `${leftPct}%`, width: `${widthPct}%`, top: 6, bottom: 6 }}
-                      >
-                        <div className="flex h-full items-center justify-center px-1 text-xs font-extrabold text-sky-800">
-                          {p.quantidade_alvo} un
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </>
-          )}
-
-          {opsDaSemana.length === 0 && pedidosDaSemana.length === 0 && (
+          {opsDaSemana.length === 0 && (
             <div className="px-3 py-12 text-center text-sm font-bold text-slate-400">
-              Sem pedidos nem OPs programados para esta semana
+              Sem OPs programadas para esta semana
             </div>
           )}
 
@@ -262,7 +211,20 @@ export function GanttTab({ pedidos = [], ops, zonas }: { pedidos?: PedidoProduca
             const cor = getCor(op);
             const isNewZona = op.zona_id !== lastZona;
             lastZona = op.zona_id;
-            const tip = `${op.produto_codigo ?? ""} ${op.produto_nome} · ${cor.label} · ${op.quantidade_atual}/${op.quantidade_alvo} un`;
+            const ped = op.pedido_id ? pedidoPorId.get(op.pedido_id) : undefined;
+            const prio = (ped?.prioridade ?? op.prioridade) as string;
+            const tipoLinha = ped?.tipo_linha ?? op.tipo_linha;
+            const tipoLabel = tipoLinha === "termoformadora" ? "T" : tipoLinha === "manual" ? "M" : tipoLinha === "stock" ? "S" : tipoLinha === "campos" ? "C" : null;
+            const prioLetter = prio === "urgente" ? "U" : prio === "alta" ? "A" : prio === "normal" ? "N" : prio === "baixa" ? "B" : "";
+            const prioCls = prio === "urgente" ? "bg-red-100 text-red-700"
+              : prio === "alta" ? "bg-orange-100 text-orange-700"
+              : prio === "normal" ? "bg-slate-100 text-slate-700"
+              : prio === "baixa" ? "bg-emerald-100 text-emerald-700"
+              : "bg-slate-50 text-slate-400";
+            const noStock = ped?.stock_status === "pendente";
+            const numeroPP = ped?.numero ?? op.numero;
+            const deadline = ped?.fim_previsto ?? op.fim_previsto;
+            const fullTip = `${numeroPP ?? ""} ${op.produto_codigo ?? ""} ${op.produto_nome} · ${op.cliente ?? ped?.cliente ?? ""}${ped?.comercial ? " · 👤 " + ped.comercial : ""} · ${op.quantidade_atual}/${op.quantidade_alvo} un · ${cor.label}${deadline ? " · deadline " + new Date(deadline).toLocaleDateString("pt-PT") : ""}${noStock ? " · ⚠ falta CP/MP" : ""}`;
             return (
               <div key={op.id}>
                 {isNewZona && (
@@ -273,47 +235,49 @@ export function GanttTab({ pedidos = [], ops, zonas }: { pedidos?: PedidoProduca
                     <div />
                   </div>
                 )}
-                <div className="grid border-b border-slate-100 hover:bg-slate-50" style={{ gridTemplateColumns: "460px 1fr" }}>
-                  <div className="flex items-center gap-2 border-r border-slate-200 px-3 py-2">
-                    {op.produto_codigo && (
-                      <span className="shrink-0 rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] font-extrabold text-white">
-                        {op.produto_codigo}
-                      </span>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-extrabold text-slate-800">{op.produto_nome}</p>
-                      <p className="truncate text-[10px] font-bold text-slate-500">
-                        {op.cliente ?? "—"}
-                        {op.lote && <span className="ml-1 rounded bg-sky-100 px-1 text-sky-700">L {op.lote}</span>}
-                      </p>
+                <div className="grid border-b border-slate-100 hover:bg-slate-50" style={{ gridTemplateColumns: "460px 1fr", minHeight: 44, maxHeight: 80 }}>
+                  <div className="flex flex-col justify-center border-r border-slate-200 px-2 py-0.5 leading-tight" title={fullTip}>
+                    <div className="flex min-w-0 items-center gap-1">
+                      {prioLetter && (
+                        <span className={cn("shrink-0 rounded px-1 text-[10px] font-extrabold", prioCls)} title={`Prio ${prio}`}>{prioLetter}</span>
+                      )}
+                      {numeroPP && (
+                        <span className="shrink-0 rounded bg-slate-900 px-1 font-mono text-[10px] font-extrabold text-white">{numeroPP}</span>
+                      )}
+                      {op.produto_codigo && (
+                        <span className="shrink-0 font-mono text-[10px] font-bold text-slate-500">{op.produto_codigo}</span>
+                      )}
+                      {tipoLabel && (
+                        <span className="shrink-0 rounded bg-slate-100 px-1 text-[10px] font-extrabold text-slate-700">{tipoLabel}</span>
+                      )}
+                      <span className="truncate text-xs font-extrabold text-slate-900">{op.produto_nome}</span>
+                      {op.lote && <span className="shrink-0 rounded bg-sky-100 px-1 text-[10px] font-bold text-sky-700">L {op.lote}</span>}
+                    </div>
+                    <div className="flex min-w-0 items-center gap-1.5 text-[10px] font-bold text-slate-500">
+                      <span className="truncate">{op.cliente ?? ped?.cliente ?? "—"}</span>
+                      {deadline && (
+                        <span className="shrink-0">· 📅 {new Date(deadline).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit" })}</span>
+                      )}
+                      {ped?.comercial && (
+                        <span className="shrink-0 truncate text-indigo-600">· 👤 {ped.comercial}</span>
+                      )}
+                      {noStock && <span className="shrink-0 rounded bg-amber-100 px-1 text-amber-700">⚠</span>}
                     </div>
                   </div>
-                  <div className="relative h-12">
+                  <div className="relative">
                     <div className="absolute inset-0 grid grid-cols-7">
                       {Array.from({ length: 7 }, (_, i) => (
                         <div key={i} className={cn("border-r border-slate-100", i === 6 && "border-r-0")} />
                       ))}
                     </div>
-                    {/* Barra + label fora, a seguir à barra */}
                     <div
-                      title={tip}
-                      className={cn("absolute rounded-md shadow-sm", cor.bg)}
+                      title={fullTip}
+                      className={cn("absolute rounded-md shadow-sm flex items-center justify-center px-2", cor.bg)}
                       style={{ left: `${leftPct}%`, width: `${widthPct}%`, top: 6, bottom: 6 }}
                     >
-                      <div className="pointer-events-none absolute left-full top-0 bottom-0 ml-1.5 flex items-center gap-1 whitespace-nowrap text-[11px] font-extrabold">
-                        {op.produto_codigo && (
-                          <span className="shrink-0 rounded bg-slate-900 px-1 font-mono text-[10px] text-white">
-                            {op.produto_codigo}
-                          </span>
-                        )}
-                        <span className="text-slate-700">
-                          {op.produto_nome}
-                          {op.lote ? ` (L ${op.lote})` : ""}
-                        </span>
-                        <span className="shrink-0 rounded bg-slate-200 px-1 text-[10px] text-slate-600">
-                          {op.quantidade_atual}/{op.quantidade_alvo}
-                        </span>
-                      </div>
+                      <span className={cn("truncate text-[11px] font-extrabold", cor.text)}>
+                        {op.quantidade_atual}/{op.quantidade_alvo} un
+                      </span>
                     </div>
                   </div>
                 </div>

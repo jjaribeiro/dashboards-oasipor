@@ -19,10 +19,16 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
   const [estado, setEstado] = useState<string>("");
   const [editItem, setEditItem] = useState<PedidoProducao | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const comerciaisExistentes = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of pedidos) if (p.comercial) s.add(p.comercial.trim());
+    return Array.from(s).filter(Boolean).sort((a, b) => a.localeCompare(b, "pt"));
+  }, [pedidos]);
   const [importOpen, setImportOpen] = useState(false);
   const [programarTodosOpen, setProgramarTodosOpen] = useState(false);
   const [prioridade, setPrioridade] = useState<string>("");
   const [categoria, setCategoria] = useState<string>("");
+  const [stockCpFiltro, setStockCpFiltro] = useState<string>("");
   // Agendamento inline
   const [selecionados, setSelecionados] = useState<Set<string>>(() => new Set());
   const [bulkDate, setBulkDate] = useState<string>("");
@@ -97,8 +103,16 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
     return pedidos
       .filter((p) => {
         if (estado && p.estado !== estado) return false;
-        if (prioridade && p.prioridade !== prioridade) return false;
+        if (prioridade) {
+          const pe = prioridadeEfetiva.get(p.id) ?? p.prioridade;
+          if (pe !== prioridade) return false;
+        }
         if (categoria && p.categoria !== categoria) return false;
+        if (stockCpFiltro) {
+          if (stockCpFiltro === "sim" && p.stock_status !== "ok") return false;
+          if (stockCpFiltro === "nao" && p.stock_status !== "pendente") return false;
+          if (stockCpFiltro === "indefinido" && p.stock_status) return false;
+        }
         if (!q) return true;
         return (
           (p.produto_codigo ?? "").toLowerCase().includes(q) ||
@@ -113,7 +127,7 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
         const tb = b.fim_previsto ? new Date(b.fim_previsto).getTime() : Infinity;
         return ta - tb;
       });
-  }, [pedidos, search, estado, prioridade, categoria]);
+  }, [pedidos, search, estado, prioridade, categoria, stockCpFiltro, prioridadeEfetiva]);
 
   function abrirEdit(p: PedidoProducao) {
     setEditItem(p);
@@ -142,9 +156,21 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
           value={prioridade}
           onChange={(e) => setPrioridade(e.target.value)}
           className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold"
+          title="Filtra pela prioridade efetiva (cascata)"
         >
           <option value="">Todas as prioridades</option>
           {Object.entries(PRIORIDADE_OP_LABEL).map(([id, l]) => <option key={id} value={id}>{l}</option>)}
+        </select>
+        <select
+          value={stockCpFiltro}
+          onChange={(e) => setStockCpFiltro(e.target.value)}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold"
+          title="Filtra por estado do stock CP/MP"
+        >
+          <option value="">Stock CP/MP: todos</option>
+          <option value="sim">✓ Sim</option>
+          <option value="nao">⚠ Não</option>
+          <option value="indefinido">— Indefinido</option>
         </select>
         <button
           onClick={() => setImportOpen(true)}
@@ -248,7 +274,7 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
                 <th className="px-3 py-2 text-right">Qtd_ped</th>
                 <th className="px-3 py-2 text-right">Pend.</th>
                 <th className="px-3 py-2 text-right">Pedido</th>
-                <th className="px-3 py-2 text-left">OPs</th>
+                <th className="px-3 py-2 text-left">Zona</th>
                 <th className="px-3 py-2 text-left">Agendado</th>
                 <th className="px-3 py-2 text-left">Deadline</th>
               </tr>
@@ -347,13 +373,13 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
                     </td>
                     <td className="px-3 py-1.5 text-[10px] text-slate-500">
                       {opsDoPedido.length === 0 ? (
-                        <span className="italic">sem OPs</span>
+                        <span className="italic text-slate-400">—</span>
                       ) : (
                         <div className="flex flex-wrap gap-1">
                           {opsDoPedido.map((o) => (
                             <span
                               key={o.id}
-                              className={cn("rounded border px-1 font-bold", ESTADO_OP_COR[o.estado])}
+                              className={cn("rounded border px-1.5 py-0.5 text-[11px] font-extrabold", ESTADO_OP_COR[o.estado])}
                               title={`${ZONA_LABEL[o.zona_id] ?? o.zona_id} · ${ESTADO_OP_LABEL[o.estado]}`}
                             >
                               {ZONA_LABEL[o.zona_id] ?? o.zona_id}
@@ -382,6 +408,7 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
           open={formOpen}
           onClose={() => setFormOpen(false)}
           editItem={editItem}
+          comerciaisExistentes={comerciaisExistentes}
         />
       )}
 
@@ -760,15 +787,14 @@ function inferRota(pedido: PedidoProducao): ZonaId[] {
   const tipo = pedido.tipo_linha;
 
   if (isCampo) {
-    if (isNE(pedido)) return ["sl1", "stock"];
-    return ["sl2_termo", "embalamento"]; // campo não-NE → termo + embalamento
+    if (isNE(pedido)) return ["sl1_campos"];
+    return ["sl2_termo", "sl2_embalamento", "eo"];
   }
   if (isPackTrouxa) {
-    // Tipo decide a 1ª zona: termo → sl2_termo, senão picking (SASC)
     const first: ZonaId = tipo === "termoformadora" ? "sl2_termo" : "sl2_picking";
-    return [first, "embalamento"];
+    return [first, "sl2_embalamento", "eo"];
   }
-  return []; // sem categoria — utilizador define à mão
+  return [];
 }
 
 function ProgramarPedidoDialog({ pedido, zonas, opsExistentes, onClose }: {
@@ -841,7 +867,8 @@ function ProgramarPedidoDialog({ pedido, zonas, opsExistentes, onClose }: {
     setSaving(true);
     const payload = validas.map((r, idx) => ({
       pedido_id: pedido.id,
-      numero: pedido.numero,
+      // Nº OP é preenchido manualmente mais tarde — não herda do pedido (PP)
+      numero: null,
       zona_id: r.zona_id,
       produto_id: pedido.produto_id,
       produto_codigo: pedido.produto_codigo,
@@ -912,14 +939,14 @@ function ProgramarPedidoDialog({ pedido, zonas, opsExistentes, onClose }: {
         {/* Sugestões — alternativas comuns conforme tipo/categoria */}
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-5 py-2 text-xs">
           <span className="font-extrabold text-slate-500">Rota:</span>
-          <button onClick={() => aplicarSugestao(["sl2_termo", "embalamento"])} className="rounded border border-slate-300 bg-white px-2 py-1 font-bold text-slate-700 hover:bg-slate-100">
-            Termo + Embalamento
+          <button onClick={() => aplicarSugestao(["sl2_termo", "sl2_embalamento", "eo"])} className="rounded border border-slate-300 bg-white px-2 py-1 font-bold text-slate-700 hover:bg-slate-100">
+            Termo + Embalam. + EO
           </button>
-          <button onClick={() => aplicarSugestao(["sl2_picking", "embalamento"])} className="rounded border border-slate-300 bg-white px-2 py-1 font-bold text-slate-700 hover:bg-slate-100">
-            SASC Picking + Embalamento
+          <button onClick={() => aplicarSugestao(["sl2_picking", "sl2_manual", "sl2_embalamento", "eo"])} className="rounded border border-slate-300 bg-white px-2 py-1 font-bold text-slate-700 hover:bg-slate-100">
+            Picking + Manual + Embal. + EO
           </button>
-          <button onClick={() => aplicarSugestao(["sl1", "stock"])} className="rounded border border-slate-300 bg-white px-2 py-1 font-bold text-slate-700 hover:bg-slate-100">
-            SL1 + Stock (NE)
+          <button onClick={() => aplicarSugestao(["sl1_campos"])} className="rounded border border-slate-300 bg-white px-2 py-1 font-bold text-slate-700 hover:bg-slate-100">
+            SL1 Campos (NE)
           </button>
           {isNE(pedido) && (
             <span className="ml-auto rounded bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-800" title="Detectado &quot;NE&quot; no produto">
@@ -1005,7 +1032,7 @@ function ProgramarPedidoDialog({ pedido, zonas, opsExistentes, onClose }: {
   );
 }
 
-export function FormPedido({ open, onClose, editItem, readOnly = false }: { open: boolean; onClose: () => void; editItem: PedidoProducao | null; readOnly?: boolean }) {
+export function FormPedido({ open, onClose, editItem, readOnly = false, comerciaisExistentes = [] }: { open: boolean; onClose: () => void; editItem: PedidoProducao | null; readOnly?: boolean; comerciaisExistentes?: string[] }) {
   const [numero, setNumero] = useState(editItem?.numero ?? "");
   const [produtoCodigo, setProdutoCodigo] = useState(editItem?.produto_codigo ?? "");
   const [produtoNome, setProdutoNome] = useState(editItem?.produto_nome ?? "");
@@ -1017,11 +1044,18 @@ export function FormPedido({ open, onClose, editItem, readOnly = false }: { open
   const [quantidadeAlvo, setQuantidadeAlvo] = useState(editItem?.quantidade_alvo ?? 0);
   const [quantidadePorCaixa, setQuantidadePorCaixa] = useState<number | "">(editItem?.quantidade_por_caixa ?? "");
   const [stockStatus, setStockStatus] = useState<"ok" | "pendente" | "">(editItem?.stock_status ?? "");
+  // Dados do Excel — não editáveis
+  const stockExistente = editItem?.stock_existente ?? "";
+  const reservasExistentes = editItem?.reservas_existentes ?? "";
+  const consumos6m = editItem?.consumos_6m ?? "";
   const [prioridade, setPrioridade] = useState(editItem?.prioridade ?? "por_definir");
   // Se o pedido já foi programado (data_agendada), mostra esse dia como Início previsto.
   const [inicioPrevisto, setInicioPrevisto] = useState(
     (editItem?.data_agendada ?? editItem?.inicio_previsto)?.slice(0, 16) ?? ""
   );
+  // Início e fim agendados (dia inteiro) — usados para esticar o card no Planeamento Semanal
+  const [inicioAgendado, setInicioAgendado] = useState(editItem?.data_agendada?.slice(0, 10) ?? "");
+  const [fimAgendado, setFimAgendado] = useState(editItem?.data_fim_agendada?.slice(0, 10) ?? "");
   const [deadline, setDeadline] = useState(editItem?.fim_previsto?.slice(0, 16) ?? "");
   const [estado, setEstado] = useState(editItem?.estado ?? "pendente");
   const [notas, setNotas] = useState(editItem?.notas ?? "");
@@ -1044,9 +1078,14 @@ export function FormPedido({ open, onClose, editItem, readOnly = false }: { open
       quantidade_alvo: Number(quantidadeAlvo) || 0,
       quantidade_por_caixa: quantidadePorCaixa === "" ? null : Number(quantidadePorCaixa),
       stock_status: stockStatus || null,
+      stock_existente: stockExistente === "" ? null : Number(stockExistente),
+      reservas_existentes: reservasExistentes === "" ? null : Number(reservasExistentes),
+      consumos_6m: consumos6m === "" ? null : Number(consumos6m),
       prioridade,
       inicio_previsto: inicioPrevisto ? new Date(inicioPrevisto).toISOString() : null,
       fim_previsto: deadline ? new Date(deadline).toISOString() : null,
+      data_agendada: inicioAgendado ? new Date(`${inicioAgendado}T11:00:00`).toISOString() : null,
+      data_fim_agendada: fimAgendado ? new Date(`${fimAgendado}T11:00:00`).toISOString() : null,
       estado,
       notas: notas || null,
     };
@@ -1063,6 +1102,22 @@ export function FormPedido({ open, onClose, editItem, readOnly = false }: { open
     if (!editItem || (editItem)) onClose();
   }
 
+  async function handleSaveAgendamento() {
+    if (!editItem) return;
+    setSaving(true);
+    const update: Record<string, unknown> = {
+      data_agendada: inicioAgendado ? new Date(`${inicioAgendado}T11:00:00`).toISOString() : null,
+      data_fim_agendada: fimAgendado ? new Date(`${fimAgendado}T11:00:00`).toISOString() : null,
+    };
+    // Se ainda está pendente e o operador agendou, passa a programado
+    if (inicioAgendado && editItem.estado === "pendente") update.estado = "programado";
+    const { error } = await supabase.from("pedidos_producao").update(update).eq("id", editItem.id);
+    setSaving(false);
+    if (error) { toast.error("Erro: " + error.message); return; }
+    toast.success("Agendamento actualizado");
+    onClose();
+  }
+
   async function handleDelete() {
     if (!editItem) return;
     if (!confirm(`Apagar pedido "${editItem.produto_nome}"? As OPs ligadas ficarão sem pedido.`)) return;
@@ -1072,16 +1127,16 @@ export function FormPedido({ open, onClose, editItem, readOnly = false }: { open
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white shadow-2xl"
+        className="flex w-full max-w-6xl max-h-[96vh] flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-          <h3 className="text-lg font-black text-slate-900">{readOnly ? "Detalhes do Pedido" : editItem ? "Editar Pedido" : "Novo Pedido"}</h3>
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+          <h3 className="text-base font-black text-slate-900">{readOnly ? "Detalhes do Pedido" : editItem ? "Editar Pedido" : "Novo Pedido"}</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-slate-500 hover:bg-slate-100">✕</button>
         </div>
-        <fieldset disabled={readOnly} className={cn("grid grid-cols-2 gap-3 p-5", readOnly && "[&_input]:bg-slate-50 [&_select]:bg-slate-50 [&_textarea]:bg-slate-50")}>
+        <fieldset disabled={readOnly} className={cn("grid grid-cols-4 gap-x-3 gap-y-2 p-3", readOnly && "[&_input]:bg-slate-50 [&_select]:bg-slate-50 [&_textarea]:bg-slate-50")}>
           <Field label="Nº Pedido (PP)">
             <input value={numero} onChange={(e) => setNumero(e.target.value)} className="input" placeholder="ex: 250619" />
           </Field>
@@ -1090,15 +1145,6 @@ export function FormPedido({ open, onClose, editItem, readOnly = false }: { open
           </Field>
           <Field label="Ref">
             <input value={produtoCodigo} onChange={(e) => setProdutoCodigo(e.target.value)} className="input" placeholder="ex: 10625005" />
-          </Field>
-          <Field label="Produto *" colSpan={2}>
-            <input value={produtoNome} onChange={(e) => setProdutoNome(e.target.value)} className="input" required />
-          </Field>
-          <Field label="Cliente">
-            <input value={cliente} onChange={(e) => setCliente(e.target.value)} className="input" disabled={readOnly} />
-          </Field>
-          <Field label="Comercial">
-            <input value={comercial} onChange={(e) => setComercial(e.target.value)} className="input" disabled={readOnly} placeholder="ex: nome do comercial" />
           </Field>
           <Field label="Categoria">
             <select value={categoria ?? ""} onChange={(e) => setCategoria(e.target.value as typeof categoria)} className="input">
@@ -1109,19 +1155,45 @@ export function FormPedido({ open, onClose, editItem, readOnly = false }: { open
               <option value="outros">Outros</option>
             </select>
           </Field>
+          <Field label="Produto *" colSpan={4}>
+            <input value={produtoNome} onChange={(e) => setProdutoNome(e.target.value)} className="input" required />
+          </Field>
+          <Field label="Cliente" colSpan={2}>
+            <input value={cliente} onChange={(e) => setCliente(e.target.value)} className="input" disabled={readOnly} />
+          </Field>
+          <Field label="Comercial" colSpan={2}>
+            <>
+              <input
+                value={comercial}
+                onChange={(e) => setComercial(e.target.value)}
+                className="input"
+                disabled={readOnly}
+                placeholder="ex: nome do comercial"
+                list="comerciais-datalist"
+                autoComplete="off"
+              />
+              <datalist id="comerciais-datalist">
+                {comerciaisExistentes.map((c) => <option key={c} value={c} />)}
+              </datalist>
+            </>
+          </Field>
           <Field label="Tipo">
             <select value={tipoLinha} onChange={(e) => setTipoLinha(e.target.value as typeof tipoLinha)} className="input">
               <option value="">—</option>
               <option value="manual">Manual</option>
               <option value="termoformadora">Termoformadora</option>
-              <option value="campos">Máquina de Campos</option>
+              <option value="campos">Máq. Campos</option>
+              <option value="laminados">Laminados</option>
+              <option value="mascaras">Máscaras</option>
+              <option value="toucas">Toucas</option>
+              <option value="outros">Outros</option>
               <option value="stock">Stock</option>
             </select>
           </Field>
           <Field label="Quantidade alvo">
             <input type="number" min={0} value={quantidadeAlvo} onChange={(e) => setQuantidadeAlvo(Number(e.target.value))} className="input" />
           </Field>
-          <Field label="Quantidade por caixa">
+          <Field label="Qtd / caixa">
             <input
               type="number"
               min={0}
@@ -1130,13 +1202,6 @@ export function FormPedido({ open, onClose, editItem, readOnly = false }: { open
               className="input"
               placeholder="—"
             />
-          </Field>
-          <Field label="Stock">
-            <select value={stockStatus} onChange={(e) => setStockStatus(e.target.value as typeof stockStatus)} className="input">
-              <option value="">— (não definido)</option>
-              <option value="ok">✓ Stock OK</option>
-              <option value="pendente">⚠ Stock Pendente</option>
-            </select>
           </Field>
           <Field label="Prioridade">
             <select value={prioridade} onChange={(e) => setPrioridade(e.target.value as typeof prioridade)} className="input">
@@ -1147,27 +1212,128 @@ export function FormPedido({ open, onClose, editItem, readOnly = false }: { open
               <option value="urgente">Urgente</option>
             </select>
           </Field>
+          <Field label="Stock CP/MP">
+            <select value={stockStatus} onChange={(e) => setStockStatus(e.target.value as typeof stockStatus)} className="input">
+              <option value="">— (não definido)</option>
+              <option value="ok">✓ Stock OK</option>
+              <option value="pendente">⚠ Stock Pendente</option>
+            </select>
+          </Field>
+          <Field label="Stock existente (Excel)">
+            <input
+              type="number"
+              value={stockExistente}
+              readOnly
+              disabled
+              className="input bg-slate-100 text-slate-700"
+              placeholder="—"
+            />
+          </Field>
+          <Field label="Reservas (Excel)">
+            <input
+              type="number"
+              value={reservasExistentes}
+              readOnly
+              disabled
+              className="input bg-slate-100 text-slate-700"
+              placeholder="—"
+            />
+          </Field>
+          <Field label="Consumos 6m (Excel)">
+            <input
+              type="number"
+              value={consumos6m}
+              readOnly
+              disabled
+              className="input bg-slate-100 text-slate-700"
+              placeholder="—"
+            />
+          </Field>
+          <Field label="Meses de stock (calculado)">
+            {(() => {
+              const cons = consumos6m === "" ? 0 : Number(consumos6m);
+              const stk = stockExistente === "" ? 0 : Number(stockExistente);
+              const res = reservasExistentes === "" ? 0 : Number(reservasExistentes);
+              const disp = stk - res;
+              if (cons <= 0) {
+                return <input value="—" disabled className="input bg-slate-50 text-slate-400" />;
+              }
+              const meses = (disp * 6) / cons;
+              const cls = meses < 0.5 ? "text-red-700 font-extrabold bg-red-50 border-red-200"
+                : meses < 1 ? "text-orange-700 font-extrabold bg-orange-50 border-orange-200"
+                : meses < 2 ? "text-amber-700 font-bold bg-amber-50 border-amber-200"
+                : meses < 6 ? "text-slate-700 font-bold bg-slate-50"
+                : "text-emerald-700 font-bold bg-emerald-50 border-emerald-200";
+              return (
+                <input
+                  value={`${Math.round(meses * 10) / 10} meses · disp. ${disp}`}
+                  disabled
+                  className={cn("input", cls)}
+                />
+              );
+            })()}
+          </Field>
           <Field label="Estado">
             <select value={estado} onChange={(e) => setEstado(e.target.value as typeof estado)} className="input">
               {Object.entries(ESTADO_PEDIDO_LABEL).map(([id, l]) => <option key={id} value={id}>{l}</option>)}
             </select>
           </Field>
           <Field label="Início previsto">
-            <input type="datetime-local" value={inicioPrevisto} onChange={(e) => setInicioPrevisto(e.target.value)} className="input" />
+            <input type="datetime-local" value={inicioPrevisto} onChange={(e) => setInicioPrevisto(e.target.value)} className="input" disabled={readOnly} />
           </Field>
-          <Field label="Deadline">
-            <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="input" />
+          <Field label="Deadline (cliente)">
+            <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="input" disabled={readOnly} />
           </Field>
-          <Field label="Notas" colSpan={2}>
-            <textarea value={notas} onChange={(e) => setNotas(e.target.value)} className="input min-h-[60px]" />
+          <Field label="Notas" colSpan={4}>
+            <textarea value={notas} onChange={(e) => setNotas(e.target.value)} className="input min-h-[38px]" rows={2} />
           </Field>
         </fieldset>
-        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-5 py-3">
+
+        {/* Secção Agendamento — sempre editável (mesmo em modo readOnly) */}
+        <div className={cn("grid grid-cols-4 items-end gap-x-3 gap-y-1 border-t border-slate-200 bg-sky-50/40 px-3 py-2")}>
+          <div className="col-span-4 -mb-1 text-[11px] font-extrabold uppercase tracking-wider text-sky-700">
+            📅 Agendamento (Planeamento Semanal)
+          </div>
+          <Field label="Início agendado">
+            <input
+              type="date"
+              value={inicioAgendado}
+              onChange={(e) => {
+                setInicioAgendado(e.target.value);
+                if (fimAgendado && e.target.value && fimAgendado < e.target.value) setFimAgendado(e.target.value);
+              }}
+              className="input"
+            />
+          </Field>
+          <Field label="Fim agendado">
+            <input
+              type="date"
+              value={fimAgendado}
+              min={inicioAgendado || undefined}
+              onChange={(e) => setFimAgendado(e.target.value)}
+              className="input"
+            />
+          </Field>
+          <p className="col-span-2 text-[10px] font-bold text-slate-500">
+            Fim em branco = 1 dia. Qtd dividida igualmente pelos dias.
+          </p>
+        </div>
+        <div className="mt-auto flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-2">
           {editItem && !readOnly ? (
             <button onClick={handleDelete} className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-bold text-red-700 hover:bg-red-100">Apagar</button>
           ) : <span />}
           <div className="flex gap-2">
             <button onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-50">{readOnly ? "Fechar" : "Cancelar"}</button>
+            {readOnly && editItem && (
+              <button
+                onClick={handleSaveAgendamento}
+                disabled={saving}
+                className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-extrabold text-white shadow-sm hover:bg-sky-700 disabled:opacity-50"
+                title="Guarda apenas o agendamento (início e fim no planeamento)"
+              >
+                {saving ? "A guardar…" : "Guardar agendamento"}
+              </button>
+            )}
             {!readOnly && (
               <button
                 onClick={handleSave}
@@ -1188,11 +1354,12 @@ export function FormPedido({ open, onClose, editItem, readOnly = false }: { open
   );
 }
 
-function Field({ label, children, colSpan = 1 }: { label: string; children: React.ReactNode; colSpan?: 1 | 2 }) {
+function Field({ label, children, colSpan = 1 }: { label: string; children: React.ReactNode; colSpan?: 1 | 2 | 3 | 4 }) {
+  const span = colSpan === 4 ? "col-span-4" : colSpan === 3 ? "col-span-3" : colSpan === 2 ? "col-span-2" : "";
   return (
-    <div className={colSpan === 2 ? "col-span-2" : ""}>
+    <div className={span}>
       <label className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500">{label}</label>
-      <div className="mt-1">{children}</div>
+      <div className="mt-0.5">{children}</div>
     </div>
   );
 }

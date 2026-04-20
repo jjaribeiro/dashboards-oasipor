@@ -1,7 +1,7 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { PlaneamentoShell } from "@/components/producao/planeamento-shell";
 import { DashboardAuthGate } from "@/components/dashboard-auth-gate";
-import type { OrdemProducao, ZonaProducao, AuditLog, ProducaoRejeito, ProducaoPausa, MetaCategoria, PedidoProducao } from "@/lib/types";
+import type { OrdemProducao, ZonaProducao, AuditLog, ProducaoRejeito, ProducaoPausa, MetaCategoria, PedidoProducao, Funcionario, PaleteEO, Produto } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ export default async function PlaneamentoPage() {
   const seteDiasAtras = new Date();
   seteDiasAtras.setDate(seteDiasAtras.getDate() - 7);
 
-  const [zonas, pedidos, ops, audit, rejeitos, pausas, metas] = await Promise.all([
+  const [zonas, pedidos, ops, audit, rejeitos, pausas, metas, funcionarios, paletes, produtos] = await Promise.all([
     supabase.from("zonas_producao").select("*").order("ordem"),
     supabase.from("pedidos_producao").select("*").order("updated_at", { ascending: false }).limit(500),
     supabase.from("ordens_producao").select("*").order("updated_at", { ascending: false }).limit(500),
@@ -19,6 +19,9 @@ export default async function PlaneamentoPage() {
     supabase.from("producao_rejeitos").select("*").gte("created_at", seteDiasAtras.toISOString()).order("created_at", { ascending: false }).limit(500),
     supabase.from("producao_pausas").select("*").gte("created_at", seteDiasAtras.toISOString()).order("created_at", { ascending: false }).limit(500),
     supabase.from("producao_metas_categoria").select("*"),
+    supabase.from("funcionarios").select("*").order("nome"),
+    supabase.from("paletes_eo").select("*").eq("estado", "planeamento").order("numero"),
+    supabase.from("produtos").select("*").order("referencia"),
   ]);
 
   return (
@@ -32,6 +35,9 @@ export default async function PlaneamentoPage() {
           initialRejeitos={(rejeitos.data ?? []) as ProducaoRejeito[]}
           initialPausas={(pausas.data ?? []) as ProducaoPausa[]}
           initialMetas={(metas.data ?? []) as MetaCategoria[]}
+          initialFuncionarios={(funcionarios.data ?? []) as Funcionario[]}
+          initialPaletes={(paletes.data ?? []) as PaleteEO[]}
+          initialProdutos={(produtos.data ?? []) as Produto[]}
         />
       </main>
     </DashboardAuthGate>

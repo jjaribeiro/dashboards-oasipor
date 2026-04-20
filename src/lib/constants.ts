@@ -64,12 +64,15 @@ export const RESPONSAVEIS = ["Joana Romão", "Ana Leal"] as const;
 // ============ PRODUÇÃO ============
 
 export const ZONA_LABEL: Record<string, string> = {
-  sl1: "SL1",
-  sl2_picking: "SASC — Picking",
+  sl1_campos: "SL1 — Máq. Campos",
+  sl1_laminados: "SL1 — Laminados",
+  sl1_mascaras: "SL1 — Máscaras",
+  sl1_toucas: "SL1 — Toucas",
+  sl1_outros: "SL1 — Outros",
+  sl2_picking: "SL2 — Picking",
   sl2_manual: "SL2 — Manual",
-  sl2_termo: "SL2 — Termoformadora",
-  embalamento: "Embalamento",
-  stock: "Stock",
+  sl2_termo: "SL2 — Termo",
+  sl2_embalamento: "SL2 — Embalamento",
   pre_cond_1: "Pré-Condicionamento 1",
   pre_cond_2: "Pré-Condicionamento 2",
   esterilizador: "Esterilizador",
@@ -77,18 +80,50 @@ export const ZONA_LABEL: Record<string, string> = {
   arejamento_2: "Arejamento 2",
 };
 
+export const ZONA_LABEL_CURTO: Record<string, string> = {
+  sl1_campos: "SL1 Campos",
+  sl1_laminados: "SL1 Lamin.",
+  sl1_mascaras: "SL1 Másc.",
+  sl1_toucas: "SL1 Toucas",
+  sl1_outros: "SL1 Outros",
+  sl2_picking: "SL2 Picking",
+  sl2_manual: "SL2 Manual",
+  sl2_termo: "SL2 Termo",
+  sl2_embalamento: "SL2 Embal.",
+  pre_cond_1: "Pré-Cond 1",
+  pre_cond_2: "Pré-Cond 2",
+  esterilizador: "Esteril.",
+  arejamento_1: "Arej 1",
+  arejamento_2: "Arej 2",
+};
+
+export const ZONA_COR: Record<string, string> = {
+  sl1_campos: "bg-sky-100 text-sky-700 border-sky-300",
+  sl1_laminados: "bg-blue-100 text-blue-700 border-blue-300",
+  sl1_mascaras: "bg-cyan-100 text-cyan-700 border-cyan-300",
+  sl1_toucas: "bg-teal-100 text-teal-700 border-teal-300",
+  sl1_outros: "bg-slate-100 text-slate-700 border-slate-300",
+  sl2_picking: "bg-violet-100 text-violet-700 border-violet-300",
+  sl2_manual: "bg-amber-100 text-amber-700 border-amber-300",
+  sl2_termo: "bg-orange-100 text-orange-700 border-orange-300",
+  sl2_embalamento: "bg-yellow-100 text-yellow-700 border-yellow-300",
+  pre_cond_1: "bg-indigo-100 text-indigo-700 border-indigo-300",
+  pre_cond_2: "bg-indigo-100 text-indigo-700 border-indigo-300",
+  esterilizador: "bg-rose-100 text-rose-700 border-rose-300",
+  arejamento_1: "bg-pink-100 text-pink-700 border-pink-300",
+  arejamento_2: "bg-pink-100 text-pink-700 border-pink-300",
+};
+
 export const AREA_LABEL: Record<string, string> = {
   sala_limpa_1: "SL1",
-  sala_limpa_2: "Sala Limpa 2",
-  esterilizacao: "Esterilização",
-  embalamento: "Embalamento",
+  sala_limpa_2: "SL2",
+  esterilizacao: "EO",
 };
 
 export const AREA_COR: Record<string, string> = {
   sala_limpa_1: "bg-sky-100 text-sky-700 border-sky-200",
   sala_limpa_2: "bg-indigo-100 text-indigo-700 border-indigo-200",
   esterilizacao: "bg-rose-100 text-rose-700 border-rose-200",
-  embalamento: "bg-amber-100 text-amber-700 border-amber-200",
 };
 
 export const CATEGORIA_PRODUTO_LABEL: Record<string, string> = {

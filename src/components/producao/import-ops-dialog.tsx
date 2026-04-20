@@ -302,63 +302,97 @@ export function ImportOpsDialog({ onClose, onImported }: ImportPedidosDialogProp
     }
     setImporting(true);
 
-    // Sem dedup no ficheiro — cada linha é um pedido.
-    // Dedup só contra a BD (mesmo numero+ref+qty já lá está) para evitar re-importar o mesmo ficheiro.
-    const chaveOf = (p: Parsed) => `${p.numero ?? "_"}__${p.produto_codigo ?? "_"}__${p.quantidade_alvo}`;
-    const numeros = validos.map((p) => p.numero).filter((n): n is string => !!n);
-    let jaExistentes: Array<{ numero: string | null; produto_codigo: string | null; quantidade_alvo: number }> = [];
+    // Chave de identificação do pedido: numero + produto_codigo (unicidade natural do PP)
+    const chaveOf = (r: { numero: string | null; produto_codigo: string | null }) => `${r.numero ?? "_"}__${r.produto_codigo ?? "_"}`;
+    const numeros = Array.from(new Set(validos.map((p) => p.numero).filter((n): n is string => !!n)));
+
+    // Carregar existentes (campos relevantes para decidir update)
+    let existentes: Array<{ id: string; numero: string | null; produto_codigo: string | null; stock_existente: number | null; reservas_existentes: number | null; consumos_6m: number | null; qtd_pendente_pp: number | null; qtd_total_pp: number | null; stock_status: "ok" | "pendente" | null }> = [];
     if (numeros.length > 0) {
-      const { data: existentes } = await supabase
+      const { data } = await supabase
         .from("pedidos_producao")
-        .select("numero, produto_codigo, quantidade_alvo")
+        .select("id, numero, produto_codigo, stock_existente, reservas_existentes, consumos_6m, qtd_pendente_pp, qtd_total_pp, stock_status")
         .in("numero", numeros);
-      jaExistentes = existentes ?? [];
+      existentes = (data ?? []) as typeof existentes;
     }
-    const chavesExistentes = new Set(jaExistentes.map((e) => `${e.numero ?? "_"}__${e.produto_codigo ?? "_"}__${e.quantidade_alvo}`));
+    const existentesMap = new Map(existentes.map((e) => [chaveOf(e), e]));
 
     const novos: Parsed[] = [];
-    let jaImportados = 0;
+    const paraAtualizar: Array<{ id: string; p: Parsed; diffs: string[] }> = [];
+    let iguais = 0;
+
     for (const p of validos) {
-      if (chavesExistentes.has(chaveOf(p))) { jaImportados++; continue; }
-      novos.push(p);
+      const existente = existentesMap.get(chaveOf(p));
+      if (!existente) { novos.push(p); continue; }
+
+      // Campos a comparar e atualizar se diferentes
+      const diffs: string[] = [];
+      if ((existente.stock_existente ?? null) !== (p.stock_existente ?? null)) diffs.push("stock");
+      if ((existente.reservas_existentes ?? null) !== (p.reservas_existentes ?? null)) diffs.push("reservas");
+      if ((existente.consumos_6m ?? null) !== (p.consumos_6m ?? null)) diffs.push("consumos");
+      if ((existente.qtd_pendente_pp ?? null) !== (p.qtd_pendente_pp ?? null)) diffs.push("pendente");
+      if ((existente.qtd_total_pp ?? null) !== (p.qtd_total_pp ?? null)) diffs.push("qtd_pp");
+      if ((existente.stock_status ?? null) !== (p.stock_status ?? null)) diffs.push("stock_status");
+
+      if (diffs.length === 0) { iguais++; continue; }
+      paraAtualizar.push({ id: existente.id, p, diffs });
     }
 
-    if (novos.length === 0) {
-      setImporting(false);
-      toast.error(`Nada a importar — todos os ${validos.length} já existem na base de dados`);
-      return;
+    // Inserir novos
+    let insertError: string | null = null;
+    if (novos.length > 0) {
+      const payload = novos.map((p) => ({
+        numero: p.numero,
+        ficha_producao: p.ficha_producao,
+        produto_codigo: p.produto_codigo,
+        produto_nome: p.produto_nome,
+        cliente: p.cliente,
+        categoria: p.categoria,
+        tipo_linha: p.tipo_linha,
+        quantidade_alvo: p.quantidade_alvo,
+        quantidade_por_caixa: p.quantidade_por_caixa,
+        consumos_6m: p.consumos_6m,
+        qtd_pendente_pp: p.qtd_pendente_pp,
+        qtd_total_pp: p.qtd_total_pp,
+        stock_existente: p.stock_existente,
+        reservas_existentes: p.reservas_existentes,
+        stock_status: p.stock_status,
+        estado: p.estado,
+        prioridade: p.prioridade,
+        inicio_previsto: p.inicio_previsto,
+        fim_previsto: p.fim_previsto,
+        notas: p.notas,
+      }));
+      const { error } = await supabase.from("pedidos_producao").insert(payload);
+      if (error) insertError = error.message;
     }
 
-    const payload = novos.map((p) => ({
-      numero: p.numero,
-      ficha_producao: p.ficha_producao,
-      produto_codigo: p.produto_codigo,
-      produto_nome: p.produto_nome,
-      cliente: p.cliente,
-      categoria: p.categoria,
-      tipo_linha: p.tipo_linha,
-      quantidade_alvo: p.quantidade_alvo,
-      quantidade_por_caixa: p.quantidade_por_caixa,
-      consumos_6m: p.consumos_6m,
-      qtd_pendente_pp: p.qtd_pendente_pp,
-      qtd_total_pp: p.qtd_total_pp,
-      stock_existente: p.stock_existente,
-      reservas_existentes: p.reservas_existentes,
-      stock_status: p.stock_status,
-      estado: p.estado,
-      prioridade: p.prioridade,
-      inicio_previsto: p.inicio_previsto,
-      fim_previsto: p.fim_previsto,
-      notas: p.notas,
-    }));
-    const { error } = await supabase.from("pedidos_producao").insert(payload);
+    // Atualizar stock/reservas/consumos dos existentes
+    let atualizados = 0;
+    let updateError: string | null = null;
+    for (const u of paraAtualizar) {
+      const { error } = await supabase.from("pedidos_producao").update({
+        stock_existente: u.p.stock_existente,
+        reservas_existentes: u.p.reservas_existentes,
+        consumos_6m: u.p.consumos_6m,
+        qtd_pendente_pp: u.p.qtd_pendente_pp,
+        qtd_total_pp: u.p.qtd_total_pp,
+        stock_status: u.p.stock_status,
+      }).eq("id", u.id);
+      if (error) { updateError = error.message; continue; }
+      atualizados++;
+    }
+
     setImporting(false);
-    if (error) {
-      toast.error(`Erro: ${error.message}`);
-      return;
-    }
-    const partes: string[] = [`${novos.length} importado${novos.length > 1 ? "s" : ""}`];
-    if (jaImportados > 0) partes.push(`${jaImportados} ignorado${jaImportados > 1 ? "s" : ""} (já existiam na BD)`);
+
+    if (insertError) { toast.error(`Erro a importar novos: ${insertError}`); return; }
+    if (updateError) { toast.error(`Erro a atualizar: ${updateError}`); }
+
+    const partes: string[] = [];
+    if (novos.length > 0) partes.push(`${novos.length} novo${novos.length > 1 ? "s" : ""}`);
+    if (atualizados > 0) partes.push(`${atualizados} atualizado${atualizados > 1 ? "s" : ""}`);
+    if (iguais > 0) partes.push(`${iguais} sem alterações`);
+    if (partes.length === 0) partes.push("Nada a importar");
     toast.success(partes.join(" · "));
     onImported?.();
     onClose();

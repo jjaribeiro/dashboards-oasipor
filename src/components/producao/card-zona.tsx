@@ -31,9 +31,10 @@ interface CardZonaProps {
   onMoveOP?: (opId: string, novaZonaId: string) => void;
   kiosk?: boolean;
   showLinhaBadge?: boolean;
+  readOnly?: boolean;
 }
 
-export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onOpenTeam, onMoveOP, kiosk, showLinhaBadge }: CardZonaProps) {
+export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onOpenTeam, onMoveOP, kiosk, showLinhaBadge, readOnly }: CardZonaProps) {
   const allZonaIds = [zona.id, ...(zonasExtra?.map((z) => z.id) ?? [])];
   const emCurso = ordens.filter((o) => o.estado === "em_curso");
   const ativas = ordens.filter((o) =>
@@ -101,13 +102,13 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
 
   return (
     <div
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      onDragEnter={readOnly ? undefined : handleDragEnter}
+      onDragOver={readOnly ? undefined : handleDragOver}
+      onDragLeave={readOnly ? undefined : handleDragLeave}
+      onDrop={readOnly ? undefined : handleDrop}
       className={cn(
         "flex h-full flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition-all",
-        dragOver ? "border-blue-400 ring-2 ring-blue-200 bg-blue-50/30" : "border-slate-200"
+        dragOver && !readOnly ? "border-blue-400 ring-2 ring-blue-200 bg-blue-50/30" : "border-slate-200"
       )}
     >
       {/* Header */}
@@ -140,8 +141,8 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
         </div>
       )}
 
-      {/* OPs — grid de 3 linhas iguais para preencher o espaço */}
-      <div className="grid flex-1 grid-rows-3 gap-1 overflow-hidden p-1.5">
+      {/* OPs — carrossel com 3 rows; scroll quando conteúdo excede */}
+      <div className="grid h-0 flex-1 grid-rows-3 gap-1 overflow-y-auto p-1.5">
         {pageOPs.length > 0 ? (
           pageOPs.map((op) => (
             <OPRow
@@ -150,6 +151,7 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
               principal={op.estado === "em_curso"}
               onClick={onOpenOP ? () => onOpenOP(op, op.zona_id) : undefined}
               showLinha={showLinhaBadge}
+              draggable={!readOnly}
             />
           ))
         ) : (
@@ -197,10 +199,21 @@ export function CardZona({ zona, zonasExtra, ordens, funcionarios, onOpenOP, onO
 /* ============================================================
    OPRow — draggable + badge de linha
    ============================================================ */
-function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; principal?: boolean; onClick?: () => void; showLinha?: boolean }) {
+const SUBZONA_BADGE: Record<string, { label: string; cor: string }> = {
+  sl1_campos: { label: "Campos", cor: "bg-sky-100 text-sky-700 border-sky-300" },
+  sl1_laminados: { label: "Laminados", cor: "bg-blue-100 text-blue-700 border-blue-300" },
+  sl1_mascaras: { label: "Máscaras", cor: "bg-cyan-100 text-cyan-700 border-cyan-300" },
+  sl1_toucas: { label: "Toucas", cor: "bg-teal-100 text-teal-700 border-teal-300" },
+  sl1_outros: { label: "Outros", cor: "bg-slate-100 text-slate-700 border-slate-300" },
+  sl2_manual: { label: "Manual", cor: "bg-amber-100 text-amber-700 border-amber-300" },
+  sl2_termo: { label: "Termo", cor: "bg-orange-100 text-orange-700 border-orange-300" },
+};
+
+function OPRow({ op, principal, onClick, showLinha, draggable = true }: { op: OrdemProducao; principal?: boolean; onClick?: () => void; showLinha?: boolean; draggable?: boolean }) {
   const pct = op.quantidade_alvo > 0 ? Math.min(100, (op.quantidade_atual / op.quantidade_alvo) * 100) : 0;
   const restante = minutesUntil(op.fim_previsto);
   const tipoBadge = op.tipo_linha ? TIPO_BADGE[op.tipo_linha] : undefined;
+  const subZonaBadge = showLinha ? SUBZONA_BADGE[op.zona_id] : undefined;
   const concluida = op.estado === "concluida";
   const atraso = !concluida && restante !== null && restante < 0;
 
@@ -220,8 +233,8 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
 
   return (
     <div
-      draggable
-      onDragStart={handleDragStart}
+      draggable={draggable}
+      onDragStart={draggable ? handleDragStart : undefined}
       onClick={onClick}
       className={cn(
         "flex min-h-0 flex-col justify-center overflow-hidden rounded-lg border border-l-4 px-2 py-1.5 transition-all select-none",
@@ -229,7 +242,7 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
         atraso ? "border-red-300 border-l-red-500 bg-red-50/40 ring-1 ring-red-200" :
         principal ? "border-emerald-200 border-l-emerald-400 bg-emerald-50" :
         "border-slate-200 border-l-slate-300 bg-white",
-        "cursor-grab active:cursor-grabbing active:opacity-60 active:scale-[0.97]",
+        draggable && "cursor-grab active:cursor-grabbing active:opacity-60 active:scale-[0.97]",
         onClick && "hover:shadow-md"
       )}
     >
@@ -240,7 +253,12 @@ function OPRow({ op, principal, onClick, showLinha }: { op: OrdemProducao; princ
             {op.produto_codigo}
           </span>
         )}
-        {tipoBadge && (
+        {subZonaBadge && (
+          <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-xs font-extrabold", subZonaBadge.cor)}>
+            {subZonaBadge.label}
+          </span>
+        )}
+        {tipoBadge && !subZonaBadge && (
           <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-xs font-extrabold", tipoBadge.cor)}>
             {tipoBadge.label}
           </span>

@@ -7,7 +7,7 @@ const TILES = [
   {
     href: "/producao/planeamento",
     title: "Produção — Planeamento",
-    subtitle: "Importar OPs · KPIs · Gantt · Auditoria · Rejeitados · Paragens",
+    subtitle: "Pedidos · Ordens · Planeamento Produção",
     icon: "📅",
     accent: "from-purple-500 to-fuchsia-600",
     ring: "ring-purple-200",
@@ -27,6 +27,30 @@ const TILES = [
     icon: "👷",
     accent: "from-emerald-500 to-teal-600",
     ring: "ring-emerald-200",
+  },
+  {
+    href: "/producao/kpis",
+    title: "Produção — KPIs",
+    subtitle: "Indicadores agregados de produção, fluxo e pessoas",
+    icon: "📊",
+    accent: "from-sky-500 to-cyan-600",
+    ring: "ring-sky-200",
+  },
+  {
+    href: "/producao/qualidade",
+    title: "Dashboard Qualidade",
+    subtitle: "Planeamento, Rótulos, CQ",
+    icon: "🔬",
+    accent: "from-lime-500 to-emerald-600",
+    ring: "ring-lime-200",
+  },
+  {
+    href: "/producao/dados",
+    title: "Funcionários",
+    subtitle: "Gestão de equipa, PINs e acessos",
+    icon: "👥",
+    accent: "from-slate-500 to-slate-800",
+    ring: "ring-slate-200",
   },
 ];
 

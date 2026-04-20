@@ -123,12 +123,15 @@ export interface AuditLog {
 // ============ PRODUÇÃO ============
 
 export type ZonaId =
-  | "sl1"
+  | "sl1_campos"
+  | "sl1_laminados"
+  | "sl1_mascaras"
+  | "sl1_toucas"
+  | "sl1_outros"
   | "sl2_picking"
   | "sl2_manual"
   | "sl2_termo"
-  | "embalamento"
-  | "stock"
+  | "sl2_embalamento"
   | "pre_cond_1"
   | "pre_cond_2"
   | "esterilizador"
@@ -152,6 +155,7 @@ export interface ZonaProducao {
   responsavel: string | null;
   meta_diaria_un: number | null;
   meta_horaria_un: number | null;
+  duracao_ciclo_min: number | null;
   created_at: string;
 }
 
@@ -165,11 +169,36 @@ export interface MetaCategoria {
   updated_at: string;
 }
 
+export type TipoCaixa = "termo" | "manual";
+
 export interface Produto {
   id: string;
   referencia: string;
   descricao: string;
   tipo: string | null;
+  tipo_caixa: TipoCaixa | null;
+  qtd_por_caixa: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type EstadoPaleteEO =
+  | "planeamento"
+  | "fechada"
+  | "em_pre_cond"
+  | "em_eo"
+  | "em_arejamento"
+  | "concluida"
+  | "cancelada";
+
+export interface PaleteEO {
+  id: string;
+  numero: number; // 1-8
+  tipo_caixa: TipoCaixa | null;
+  estado: EstadoPaleteEO;
+  ciclo_id: string | null;
+  fechada_em: string | null;
+  notas: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -181,13 +210,42 @@ export interface Funcionario {
   cor: string | null;
   zona_atual: ZonaId | null;
   ativo: boolean;
+  email: string | null;
+  departamento: string | null;
+  funcao: string | null;
+  acessos: string[];
+  pin: string | null;
   created_at: string;
   updated_at: string;
 }
 
+export interface EscalaFuncionario {
+  id: string;
+  funcionario_id: string;
+  data: string; // YYYY-MM-DD
+  zona_id: ZonaId;
+  notas: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TipoPresenca = "entrada" | "pausa_inicio" | "pausa_fim" | "saida";
+export type EstadoPresenca = "ausente" | "presente" | "em_pausa";
+
+export interface FuncionarioPresenca {
+  id: string;
+  funcionario_id: string;
+  funcionario_nome: string;
+  zona_id: ZonaId | null;
+  tipo: TipoPresenca;
+  motivo: string | null;
+  notas: string | null;
+  criado_em: string;
+}
+
 export type EstadoOP = "planeada" | "em_curso" | "pausada" | "concluida" | "cancelada";
 export type PrioridadeOP = "por_definir" | "baixa" | "normal" | "alta" | "urgente";
-export type TipoLinha = "manual" | "termoformadora" | "stock" | "campos" | null;
+export type TipoLinha = "manual" | "termoformadora" | "stock" | "campos" | "laminados" | "mascaras" | "toucas" | "outros" | null;
 export type CategoriaProduto = "campo" | "trouxa" | "pack" | "outros";
 export type EstadoPedido = "pendente" | "programado" | "em_producao" | "concluido" | "cancelado";
 
@@ -216,6 +274,8 @@ export interface PedidoProducao {
   inicio_previsto: string | null;
   fim_previsto: string | null; // deadline do cliente (do Excel)
   data_agendada: string | null; // dia alvo de produção definido pelo "Programar Tudo"
+  data_fim_agendada: string | null; // último dia em que o pedido ocupa a grelha (multi-dia). Se null, ocupa só data_agendada.
+  precisa_rotulagem: boolean;
   inicio_real: string | null;
   fim_real: string | null;
   estado: EstadoPedido;
@@ -250,6 +310,10 @@ export interface OrdemProducao {
   fim_real: string | null;
   responsavel: string | null;
   notas: string | null;
+  op_anterior_id: string | null;
+  bloqueada: boolean;
+  palete_eo_id: string | null;
+  num_caixas: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -278,6 +342,80 @@ export interface ProducaoPausa {
   duracao_min: number | null;
   notas: string | null;
   created_at: string;
+}
+
+export type ResultadoRotulagem = "aprovado" | "reetiquetar" | "descartar" | "pendente";
+
+export interface RotulagemInspecao {
+  id: string;
+  op_id: string | null;
+  pedido_id: string | null;
+  lote: string | null;
+  check_lote: boolean;
+  check_validade: boolean;
+  check_ref_cliente: boolean;
+  check_idioma: boolean;
+  check_quantidade: boolean;
+  resultado: ResultadoRotulagem;
+  qtd_reetiquetada: number;
+  qtd_descartada: number;
+  foto_url: string | null;
+  pessoa_id: string | null;
+  pessoa_nome: string | null;
+  notas: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ResultadoCq = "aprovado" | "rejeitado" | "condicionado" | "pendente";
+
+export interface CqChecklistItem {
+  descricao: string;
+  ok: boolean;
+}
+
+export interface CqInspecao {
+  id: string;
+  op_id: string | null;
+  pedido_id: string | null;
+  produto_codigo: string | null;
+  tamanho_amostra: number;
+  checklist: CqChecklistItem[];
+  resultado: ResultadoCq;
+  pessoa_id: string | null;
+  pessoa_nome: string | null;
+  notas: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SeveridadeNc = "baixa" | "media" | "alta" | "critica";
+export type EstadoNc = "aberta" | "em_analise" | "em_correcao" | "fechada" | "cancelada";
+export type TipoNc = "produto" | "processo" | "rotulagem" | "embalamento" | "esterilizacao" | "fornecedor" | "outros";
+
+export interface NaoConformidade {
+  id: string;
+  numero: string | null;
+  op_id: string | null;
+  pedido_id: string | null;
+  zona_id: string | null;
+  tipo: TipoNc | null;
+  severidade: SeveridadeNc;
+  descricao: string;
+  causa_raiz: string | null;
+  acao_corretiva: string | null;
+  responsavel: string | null;
+  prazo: string | null;
+  qtd_afetada: number;
+  estado: EstadoNc;
+  bloqueia_op: boolean;
+  detetado_por_pessoa_id: string | null;
+  detetado_por_pessoa_nome: string | null;
+  fechada_em: string | null;
+  fechada_por_pessoa_id: string | null;
+  notas: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export type EstadoCiclo = "vazio" | "em_ciclo" | "concluido" | "alarme";

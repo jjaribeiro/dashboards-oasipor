@@ -20,6 +20,10 @@ interface FormOPProps {
   defaultZona?: string;
   /** Modo painel: apenas edita Qtd Feita / Estado / Notas. Restante é read-only. */
   painelMode?: boolean;
+  /** Navegação entre OPs da lista */
+  onPrev?: () => void;
+  onNext?: () => void;
+  navInfo?: { current: number; total: number };
 }
 
 /** Mapeia zona do form + tipo_linha → zona_id real no DB */
@@ -37,7 +41,7 @@ function formZonaFromId(zonaId: string): string {
   return zonaId;
 }
 
-export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode = false }: FormOPProps) {
+export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode = false, onPrev, onNext, navInfo }: FormOPProps) {
   const [loading, setLoading] = useState(false);
   const [selectedZona, setSelectedZona] = useState(
     editItem ? formZonaFromId(editItem.zona_id) : (defaultZona ? formZonaFromId(defaultZona) : "")
@@ -81,24 +85,25 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
     setLoading(true);
     const form = new FormData(e.currentTarget);
 
-    // Modo painel: apenas atualiza quantidade_atual / estado / notas
+    // Modo painel: apenas atualiza estado / notas (quantidade_atual é gerida no painel do operador)
     if (painelMode && editItem) {
       const patch = {
-        quantidade_atual: Number(form.get("quantidade_atual") || 0),
         estado: form.get("estado") as string,
         notas: (form.get("notas") as string) || null,
       };
       const { error } = await supabase.from("ordens_producao").update(patch).eq("id", editItem.id);
       setLoading(false);
-      if (error) { toast.error("Erro ao guardar"); return; }
+      if (error) { console.error("save painel", error); toast.error(`Erro ao guardar: ${error.message}`); return; }
       toast.success("OP atualizada");
       onOpenChange(false);
       return;
     }
 
-    const formZona = form.get("zona_id") as string;
-    const tipoLinha = (form.get("tipo_linha") as string) || null;
+    // selects disabled não submetem via FormData — usar estado + editItem
+    const formZona = selectedZona || (editItem ? formZonaFromId(editItem.zona_id) : "");
+    const tipoLinha = (form.get("tipo_linha") as string) || editItem?.tipo_linha || null;
     const zonaId = resolveZonaId(formZona, tipoLinha);
+    if (!zonaId) { setLoading(false); toast.error("Zona em falta"); return; }
 
     const data = {
       numero: (form.get("numero") as string) || null,
@@ -109,7 +114,8 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
       cliente: (form.get("cliente") as string) || null,
       categoria: (form.get("categoria") as string) || null,
       quantidade_alvo: Number(form.get("quantidade_alvo") || 0),
-      quantidade_atual: Number(form.get("quantidade_atual") || 0),
+      // quantidade_atual não é editável aqui — preserva valor existente ou 0 em novas OPs
+      quantidade_atual: editItem?.quantidade_atual ?? 0,
       estado: form.get("estado") as string,
       prioridade: form.get("prioridade") as string,
       tipo_linha: tipoLinha,
@@ -128,7 +134,8 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
 
     setLoading(false);
     if (error) {
-      toast.error("Erro ao guardar OP");
+      console.error("save op", error, data);
+      toast.error(`Erro ao guardar OP: ${error.message}`);
       return;
     }
     toast.success(editItem ? "OP atualizada" : "OP criada");
@@ -144,6 +151,7 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
 
   async function concluir() {
     if (!editItem) return;
+    if (!confirm(`Concluir a OP "${editItem.produto_nome}"? Tens mesmo a certeza?`)) return;
     const { error } = await supabase
       .from("ordens_producao")
       .update({ estado: "concluida", fim_real: new Date().toISOString() })
@@ -157,7 +165,7 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
 
   async function apagar() {
     if (!editItem) return;
-    if (!confirm("Tem a certeza que quer apagar esta OP?")) return;
+    if (!confirm(`Apagar a OP "${editItem.produto_nome}"? Tens mesmo a certeza? Esta acção é irreversível.`)) return;
     const { error } = await supabase.from("ordens_producao").delete().eq("id", editItem.id);
     if (error) toast.error("Erro ao apagar OP");
     else {
@@ -205,8 +213,12 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
                 type="number"
                 min={0}
                 defaultValue={editItem.quantidade_atual ?? 0}
-                className="mt-1"
+                className="mt-1 bg-slate-100 text-slate-600"
+                readOnly
+                disabled
+                title="A quantidade feita é atualizada no painel do operador"
               />
+              <p className="mt-0.5 text-[10px] font-bold text-slate-400">Atualizada no painel do operador</p>
             </div>
 
             <div>
@@ -257,14 +269,13 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
               <Input id="numero" name="numero" defaultValue={editItem?.numero ?? ""} className="mt-1" />
             </div>
             <div>
-              <Label htmlFor="zona_id">Zona *</Label>
+              <Label htmlFor="zona_id">Zona</Label>
               <select
                 id="zona_id"
                 name="zona_id"
-                required
                 value={selectedZona}
-                onChange={(e) => setSelectedZona(e.target.value)}
-                className="mt-1 flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                disabled
+                className="mt-1 flex h-10 w-full rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600"
               >
                 <option value="">—</option>
                 {ZONAS_OP.map((z) => (
@@ -274,14 +285,15 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
             </div>
           </div>
 
-          {/* Tipo: Manual / Termoformadora / Stock */}
+          {/* Tipo: auto (derivado do produto/pedido) */}
           <div>
-            <Label htmlFor="tipo_linha">Tipo</Label>
+            <Label htmlFor="tipo_linha">Tipo (auto)</Label>
             <select
               id="tipo_linha"
               name="tipo_linha"
               defaultValue={editItem?.tipo_linha ?? ""}
-              className="mt-1 flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+              disabled
+              className="mt-1 flex h-10 w-full rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600"
             >
               <option value="">— Nenhum —</option>
               {TIPO_LINHA_OPTIONS.map((t) => (
@@ -360,7 +372,18 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="quantidade_atual">Qtd Feita</Label>
-              <Input id="quantidade_atual" name="quantidade_atual" type="number" min={0} defaultValue={editItem?.quantidade_atual ?? 0} className="mt-1" />
+              <Input
+                id="quantidade_atual"
+                name="quantidade_atual"
+                type="number"
+                min={0}
+                defaultValue={editItem?.quantidade_atual ?? 0}
+                className="mt-1 bg-slate-100 text-slate-600"
+                readOnly
+                disabled
+                title="A quantidade feita é atualizada no painel do operador"
+              />
+              <p className="mt-0.5 text-[10px] font-bold text-slate-400">Atualizada no painel do operador</p>
             </div>
             <div>
               <Label htmlFor="quantidade_alvo">Qtd Alvo</Label>

@@ -1,59 +1,18 @@
 "use client";
 
-import { usePessoaSession, logAction } from "@/hooks/use-pessoa-session";
-import { PinGate } from "@/components/pin-gate";
-
 interface DashboardAuthGateProps {
   children: React.ReactNode;
-  dashboardKey: string; // ex: "comercial", "gestao", "operador"
-  title: string;
+  // mantidos para compatibilidade — ignorados enquanto PIN está desativado
+  dashboardKey?: string;
+  title?: string;
   subtitle?: string;
-  hideBadge?: boolean; // se true, não renderiza o badge flutuante (a página renderiza o seu inline)
+  hideBadge?: boolean;
 }
 
-export function DashboardAuthGate({ children, dashboardKey, title, subtitle, hideBadge }: DashboardAuthGateProps) {
-  const { session, loaded, login, logout } = usePessoaSession();
-
-  if (!loaded) {
-    return <div className="flex h-full items-center justify-center text-slate-400">A carregar…</div>;
-  }
-
-  if (!session) {
-    return (
-      <PinGate
-        title={title}
-        subtitle={subtitle ?? "Introduz o teu PIN para entrar"}
-        onValidate={login}
-        onSuccess={(pessoa) => {
-          logAction({
-            pessoaId: pessoa.id,
-            pessoaNome: pessoa.nome,
-            acao: `login_${dashboardKey}`,
-          });
-        }}
-      />
-    );
-  }
-
-  return (
-    <>
-      {children}
-      {!hideBadge && (
-        <SessionBadge
-          variant="floating"
-          nome={session.pessoaNome}
-          onLogout={() => {
-            logAction({
-              pessoaId: session.pessoaId,
-              pessoaNome: session.pessoaNome,
-              acao: `logout_${dashboardKey}`,
-            });
-            logout();
-          }}
-        />
-      )}
-    </>
-  );
+// PIN temporariamente desativado — apenas renderiza os filhos sem gate.
+// Para reactivar, restaurar a versão anterior deste ficheiro.
+export function DashboardAuthGate({ children }: DashboardAuthGateProps) {
+  return <>{children}</>;
 }
 
 interface SessionBadgeProps {

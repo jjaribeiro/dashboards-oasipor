@@ -10,186 +10,418 @@ import type { Funcionario, Produto } from "@/lib/types";
 
 interface Props {
   initialFuncionarios: Funcionario[];
-  initialProdutos: Produto[];
+  initialProdutos?: Produto[];
 }
 
-type Tab = "funcionarios" | "produtos";
-
-const TIPO_OPTIONS = ["Manual", "Termoformadora", "Stock"];
-
-export function DadosGrid({ initialFuncionarios, initialProdutos }: Props) {
+export function DadosGrid({ initialFuncionarios }: Props) {
   const { items: funcionarios, refetch: refetchFunc } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
-  const { items: produtos, refetch: refetchProd } = useRealtimeTable<Produto>("produtos", initialProdutos, { orderBy: "referencia" });
-  const [tab, setTab] = useState<Tab>("funcionarios");
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-6">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="mx-auto max-w-7xl px-6 py-6">
+      <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <a href="/producao/gestao" className="flex items-center gap-2 text-slate-500 transition-colors hover:text-slate-900" title="Voltar">
+          <a href="/" className="flex items-center gap-2 text-slate-500 transition-colors hover:text-slate-900" title="Voltar ao hub">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
           </a>
-          <h1 className="text-2xl font-extrabold text-slate-900">Dados de Produção</h1>
+          <h1 className="text-2xl font-extrabold text-slate-900">Funcionários</h1>
+          <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{funcionarios.length}</span>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="mb-4 flex gap-1 rounded-lg bg-slate-200 p-1">
-        <button
-          onClick={() => setTab("funcionarios")}
-          className={cn(
-            "flex-1 rounded-md px-4 py-2 text-sm font-bold transition-all",
-            tab === "funcionarios" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-          )}
-        >
-          Funcionários ({funcionarios.length})
-        </button>
-        <button
-          onClick={() => setTab("produtos")}
-          className={cn(
-            "flex-1 rounded-md px-4 py-2 text-sm font-bold transition-all",
-            tab === "produtos" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-          )}
-        >
-          Produtos ({produtos.length})
-        </button>
-      </div>
-
-      {tab === "funcionarios" && <TabelaFuncionarios items={funcionarios} refetch={refetchFunc} />}
-      {tab === "produtos" && <TabelaProdutos items={produtos} refetch={refetchProd} />}
+      <GridFuncionarios items={funcionarios} refetch={refetchFunc} />
     </div>
   );
 }
 
 /* ============================================================
-   Tabela Funcionários (igual)
+   Grid Funcionários — cards compactos com edição rápida
    ============================================================ */
-function TabelaFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: () => void }) {
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editData, setEditData] = useState({ nome: "", iniciais: "", cor: "#64748b" });
-  const [newRow, setNewRow] = useState(false);
-  const [newData, setNewData] = useState({ nome: "", iniciais: "", cor: "#64748b" });
+const PRESET_COLORS = [
+  "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e",
+  "#10b981", "#14b8a6", "#06b6d4", "#0ea5e9", "#3b82f6", "#6366f1",
+  "#8b5cf6", "#a855f7", "#d946ef", "#ec4899", "#f43f5e", "#64748b",
+];
+
+const DEPARTAMENTOS = ["Produção", "Qualidade", "Logística", "Comercial", "Administração", "Manutenção", "Outros"];
+const FUNCOES = ["Operador", "Chefe de linha", "Supervisor", "Responsável", "Técnico de Qualidade", "Administrativo", "Gestor", "Outro"];
+const ACESSOS_DISPONIVEIS: { key: string; label: string; icon: string }[] = [
+  { key: "planeamento", label: "Planeamento", icon: "📅" },
+  { key: "gestao", label: "Gestão", icon: "🏭" },
+  { key: "operador", label: "Operador", icon: "👷" },
+  { key: "kpis", label: "KPIs", icon: "📊" },
+  { key: "qualidade", label: "Qualidade", icon: "🔬" },
+  { key: "dados", label: "Dados", icon: "⚙️" },
+];
+
+type FuncData = {
+  nome: string;
+  iniciais: string;
+  cor: string;
+  ativo: boolean;
+  email: string;
+  departamento: string;
+  funcao: string;
+  acessos: string[];
+  pin: string;
+};
+
+const EMPTY_FUNC: FuncData = { nome: "", iniciais: "", cor: "#64748b", ativo: true, email: "", departamento: "", funcao: "", acessos: [], pin: "" };
+
+function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: () => void }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null); // null = novo
+  const [data, setData] = useState<FuncData>(EMPTY_FUNC);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [showInativos, setShowInativos] = useState(false);
 
-  const startEdit = (f: Funcionario) => {
+  const filtered = items.filter((f) => {
+    if (!showInativos && !f.ativo) return false;
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      f.nome.toLowerCase().includes(q) ||
+      (f.iniciais ?? "").toLowerCase().includes(q) ||
+      (f.email ?? "").toLowerCase().includes(q) ||
+      (f.departamento ?? "").toLowerCase().includes(q) ||
+      (f.funcao ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  const openEdit = (f: Funcionario) => {
     setEditId(f.id);
-    setEditData({ nome: f.nome, iniciais: f.iniciais ?? "", cor: f.cor ?? "#64748b" });
-  };
-  const cancelEdit = () => setEditId(null);
-
-  const saveEdit = useCallback(async () => {
-    if (!editId || !editData.nome.trim()) return;
-    setSaving(true);
-    const { error } = await supabase.from("funcionarios").update({
-      nome: editData.nome.trim(),
-      iniciais: editData.iniciais.trim() || null,
-      cor: editData.cor,
-    }).eq("id", editId);
-    setSaving(false);
-    if (error) toast.error("Erro ao guardar");
-    else { toast.success("Guardado"); setEditId(null); refetch(); }
-  }, [editId, editData, refetch]);
-
-  const addNew = useCallback(async () => {
-    if (!newData.nome.trim()) return;
-    setSaving(true);
-    const { error } = await supabase.from("funcionarios").insert({
-      nome: newData.nome.trim(), iniciais: newData.iniciais.trim() || null, cor: newData.cor, ativo: true,
+    setData({
+      nome: f.nome,
+      iniciais: f.iniciais ?? "",
+      cor: f.cor ?? "#64748b",
+      ativo: f.ativo,
+      email: f.email ?? "",
+      departamento: f.departamento ?? "",
+      funcao: f.funcao ?? "",
+      acessos: f.acessos ?? [],
+      pin: f.pin ?? "",
     });
-    setSaving(false);
-    if (error) toast.error("Erro ao criar");
-    else { toast.success("Funcionário criado"); setNewRow(false); setNewData({ nome: "", iniciais: "", cor: "#64748b" }); refetch(); }
-  }, [newData, refetch]);
+    setDialogOpen(true);
+  };
 
-  const remove = useCallback(async (id: string) => {
-    if (!confirm("Apagar este funcionário?")) return;
-    const { error } = await supabase.from("funcionarios").delete().eq("id", id);
+  const openNew = () => {
+    setEditId(null);
+    setData(EMPTY_FUNC);
+    setDialogOpen(true);
+  };
+
+  const close = () => { setDialogOpen(false); setEditId(null); };
+
+  const save = useCallback(async () => {
+    if (!data.nome.trim()) return;
+    setSaving(true);
+    const iniciaisAuto = data.iniciais.trim() || data.nome.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+    const payload = {
+      nome: data.nome.trim(),
+      iniciais: iniciaisAuto || null,
+      cor: data.cor,
+      ativo: data.ativo,
+      email: data.email.trim() || null,
+      departamento: data.departamento.trim() || null,
+      funcao: data.funcao.trim() || null,
+      acessos: data.acessos,
+      pin: data.pin.trim() || null,
+    };
+    const { error } = editId
+      ? await supabase.from("funcionarios").update(payload).eq("id", editId)
+      : await supabase.from("funcionarios").insert({ ...payload, ativo: true });
+    setSaving(false);
+    if (error) toast.error(`Erro: ${error.message}`);
+    else { toast.success(editId ? "Guardado" : "Criado"); close(); refetch(); }
+  }, [editId, data, refetch]);
+
+  const remove = useCallback(async () => {
+    if (!editId) return;
+    if (!confirm(`Apagar "${data.nome}"? Histórico mantém-se.`)) return;
+    const { error } = await supabase.from("funcionarios").delete().eq("id", editId);
     if (error) toast.error("Erro ao apagar");
-    else { toast.success("Apagado"); refetch(); }
-  }, [refetch]);
+    else { toast.success("Apagado"); close(); refetch(); }
+  }, [editId, data.nome, refetch]);
+
+  const toggleAcesso = (key: string) => {
+    setData((d) => ({ ...d, acessos: d.acessos.includes(key) ? d.acessos.filter((k) => k !== key) : [...d.acessos, key] }));
+  };
+
+  const iniciaisPreview = (data.iniciais || data.nome.split(/\s+/).map((p) => p[0]).slice(0, 2).join("")).toUpperCase() || "?";
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-            <th className="px-4 py-3">Nome</th>
-            <th className="px-4 py-3 w-24">Iniciais</th>
-            <th className="px-4 py-3 w-20">Cor</th>
-            <th className="px-4 py-3 w-28 text-right">Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((f) => (
-            <tr key={f.id} className="border-b border-slate-100 hover:bg-slate-50">
-              {editId === f.id ? (
-                <>
-                  <td className="px-4 py-2">
-                    <input value={editData.nome} onChange={(e) => setEditData((d) => ({ ...d, nome: e.target.value }))}
-                      className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm" autoFocus
-                      onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") cancelEdit(); }} />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input value={editData.iniciais} onChange={(e) => setEditData((d) => ({ ...d, iniciais: e.target.value }))}
-                      className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm text-center" maxLength={3}
-                      onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") cancelEdit(); }} />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input type="color" value={editData.cor} onChange={(e) => setEditData((d) => ({ ...d, cor: e.target.value }))}
-                      className="h-8 w-12 cursor-pointer rounded border border-slate-200" />
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <button onClick={saveEdit} disabled={saving} className="mr-2 rounded-md bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-200">{saving ? "..." : "Guardar"}</button>
-                    <button onClick={cancelEdit} className="rounded-md bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500 hover:bg-slate-200">Cancelar</button>
-                  </td>
-                </>
-              ) : (
-                <>
-                  <td className="px-4 py-2.5 font-bold text-slate-900">{f.nome}</td>
-                  <td className="px-4 py-2.5 text-center">
-                    {f.iniciais && (
-                      <span className="inline-flex h-7 items-center rounded-full px-2.5 text-xs font-extrabold text-white" style={{ backgroundColor: f.cor ?? "#64748b" }}>{f.iniciais}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5"><div className="h-6 w-10 rounded-md border border-slate-200" style={{ backgroundColor: f.cor ?? "#64748b" }} /></td>
-                  <td className="px-4 py-2.5 text-right">
-                    <button onClick={() => startEdit(f)} className="mr-2 rounded-md bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200">Editar</button>
-                    <button onClick={() => remove(f.id)} className="rounded-md bg-red-50 px-3 py-1 text-xs font-bold text-red-600 hover:bg-red-100">Apagar</button>
-                  </td>
-                </>
+    <div className="space-y-3">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Pesquisar por nome, email, departamento, função…"
+          className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
+        />
+        <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 shadow-sm hover:bg-slate-50">
+          <input type="checkbox" checked={showInativos} onChange={(e) => setShowInativos(e.target.checked)} className="h-3.5 w-3.5" />
+          Mostrar inativos
+        </label>
+        <button
+          onClick={openNew}
+          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-extrabold text-white shadow-sm transition-colors hover:bg-emerald-700"
+        >+ Novo funcionário</button>
+      </div>
+
+      {/* Grid de cards */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+        {filtered.map((f) => (
+          <button
+            key={f.id}
+            onClick={() => openEdit(f)}
+            className={cn(
+              "group relative flex flex-col items-center gap-2 rounded-xl border bg-white p-3 text-center shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md",
+              f.ativo ? "border-slate-200" : "border-slate-200 opacity-60"
+            )}
+          >
+            <div
+              className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-black text-white shadow-inner ring-2 ring-white"
+              style={{ backgroundColor: f.cor ?? "#64748b" }}
+            >
+              {f.iniciais ?? f.nome.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+            </div>
+            <div>
+              <span className="line-clamp-2 text-xs font-extrabold leading-tight text-slate-900">{f.nome}</span>
+              {(f.funcao || f.departamento) && (
+                <p className="mt-0.5 line-clamp-1 text-[10px] font-bold text-slate-500">
+                  {[f.funcao, f.departamento].filter(Boolean).join(" · ")}
+                </p>
               )}
-            </tr>
-          ))}
-          {newRow && (
-            <tr className="border-b border-slate-100 bg-blue-50/30">
-              <td className="px-4 py-2">
-                <input value={newData.nome} onChange={(e) => setNewData((d) => ({ ...d, nome: e.target.value }))} placeholder="Nome do funcionário"
-                  className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm" autoFocus
-                  onKeyDown={(e) => { if (e.key === "Enter") addNew(); if (e.key === "Escape") setNewRow(false); }} />
-              </td>
-              <td className="px-4 py-2">
-                <input value={newData.iniciais} onChange={(e) => setNewData((d) => ({ ...d, iniciais: e.target.value }))} placeholder="Ex: JS"
-                  className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm text-center" maxLength={3}
-                  onKeyDown={(e) => { if (e.key === "Enter") addNew(); if (e.key === "Escape") setNewRow(false); }} />
-              </td>
-              <td className="px-4 py-2">
-                <input type="color" value={newData.cor} onChange={(e) => setNewData((d) => ({ ...d, cor: e.target.value }))} className="h-8 w-12 cursor-pointer rounded border border-slate-200" />
-              </td>
-              <td className="px-4 py-2 text-right">
-                <button onClick={addNew} disabled={saving} className="mr-2 rounded-md bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-200">{saving ? "..." : "Adicionar"}</button>
-                <button onClick={() => setNewRow(false)} className="rounded-md bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500 hover:bg-slate-200">Cancelar</button>
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-      {!newRow && (
-        <button onClick={() => setNewRow(true)}
-          className="flex w-full items-center justify-center gap-2 border-t border-dashed border-slate-200 py-3 text-sm font-bold text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600">
-          + Novo Funcionário
-        </button>
+            </div>
+            {!f.ativo && (
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-slate-500">inativo</span>
+            )}
+          </button>
+        ))}
+        {filtered.length === 0 && (
+          <div className="col-span-full rounded-xl border border-dashed border-slate-200 bg-white py-12 text-center text-sm font-bold text-slate-400">
+            {search ? `Nenhum funcionário corresponde a "${search}"` : "Sem funcionários"}
+          </div>
+        )}
+      </div>
+
+      {/* Modal */}
+      {dialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={close}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex w-full max-w-3xl max-h-[92vh] flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-5 py-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex h-12 w-12 items-center justify-center rounded-full text-lg font-black text-white shadow ring-2 ring-white"
+                  style={{ backgroundColor: data.cor }}
+                >{iniciaisPreview}</div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">{editId ? "Editar funcionário" : "Novo funcionário"}</h3>
+                  <p className="text-[11px] font-bold text-slate-500">Perfil completo: dados, cor, acessos</p>
+                </div>
+              </div>
+              <button onClick={close} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">✕</button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* Identificação */}
+                <section className="md:col-span-2">
+                  <h4 className="mb-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Identificação</h4>
+                  <div className="grid gap-3 md:grid-cols-[2fr_1fr]">
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Nome *</label>
+                      <input
+                        value={data.nome}
+                        onChange={(e) => setData((d) => ({ ...d, nome: e.target.value }))}
+                        className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-semibold"
+                        placeholder="Nome completo"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Iniciais</label>
+                      <input
+                        value={data.iniciais}
+                        onChange={(e) => setData((d) => ({ ...d, iniciais: e.target.value.toUpperCase() }))}
+                        maxLength={3}
+                        className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-center text-sm font-extrabold tracking-wider"
+                        placeholder="auto"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                {/* Contacto + Empresa */}
+                <section>
+                  <h4 className="mb-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Contacto &amp; PIN</h4>
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Email</label>
+                      <input
+                        type="email"
+                        value={data.email}
+                        onChange={(e) => setData((d) => ({ ...d, email: e.target.value }))}
+                        className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-semibold"
+                        placeholder="nome@oasipor.pt"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500">PIN (entrada/pausa/saída)</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        pattern="[0-9]*"
+                        value={data.pin}
+                        onChange={(e) => setData((d) => ({ ...d, pin: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
+                        className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-mono font-extrabold tracking-[0.3em]"
+                        placeholder="4–6 dígitos"
+                      />
+                      <p className="mt-0.5 text-[10px] font-bold text-slate-400">Usado pela pessoa para marcar presença na linha</p>
+                    </div>
+                  </div>
+                </section>
+                <section>
+                  <h4 className="mb-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Organização</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Departamento</label>
+                      <input
+                        value={data.departamento}
+                        onChange={(e) => setData((d) => ({ ...d, departamento: e.target.value }))}
+                        list="deps-list"
+                        className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-semibold"
+                        placeholder="Ex: Produção"
+                      />
+                      <datalist id="deps-list">
+                        {DEPARTAMENTOS.map((d) => <option key={d} value={d} />)}
+                      </datalist>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Função</label>
+                      <input
+                        value={data.funcao}
+                        onChange={(e) => setData((d) => ({ ...d, funcao: e.target.value }))}
+                        list="fn-list"
+                        className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-semibold"
+                        placeholder="Ex: Operador"
+                      />
+                      <datalist id="fn-list">
+                        {FUNCOES.map((f) => <option key={f} value={f} />)}
+                      </datalist>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Cor */}
+                <section className="md:col-span-2">
+                  <h4 className="mb-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Cor do avatar</h4>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {PRESET_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setData((d) => ({ ...d, cor: c }))}
+                        className={cn(
+                          "h-7 w-7 rounded-full border-2 transition-all hover:scale-110",
+                          data.cor === c ? "border-slate-900 ring-2 ring-slate-300" : "border-white shadow"
+                        )}
+                        style={{ backgroundColor: c }}
+                        aria-label={`Cor ${c}`}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      value={data.cor}
+                      onChange={(e) => setData((d) => ({ ...d, cor: e.target.value }))}
+                      className="h-7 w-10 cursor-pointer rounded border border-slate-200"
+                      title="Cor personalizada"
+                    />
+                  </div>
+                </section>
+
+                {/* Acessos */}
+                <section className="md:col-span-2">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h4 className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Acessos aos dashboards</h4>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setData((d) => ({ ...d, acessos: ACESSOS_DISPONIVEIS.map((a) => a.key) }))}
+                        className="rounded px-2 py-0.5 text-[10px] font-bold text-slate-500 hover:bg-slate-100"
+                      >Selecionar todos</button>
+                      <button
+                        type="button"
+                        onClick={() => setData((d) => ({ ...d, acessos: [] }))}
+                        className="rounded px-2 py-0.5 text-[10px] font-bold text-slate-500 hover:bg-slate-100"
+                      >Nenhum</button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                    {ACESSOS_DISPONIVEIS.map((a) => {
+                      const on = data.acessos.includes(a.key);
+                      return (
+                        <button
+                          key={a.key}
+                          type="button"
+                          onClick={() => toggleAcesso(a.key)}
+                          className={cn(
+                            "flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-left text-xs font-extrabold transition-all",
+                            on
+                              ? "border-emerald-400 bg-emerald-50 text-emerald-800 shadow-sm"
+                              : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                          )}
+                        >
+                          <span className="text-base">{a.icon}</span>
+                          <span className="flex-1 truncate">{a.label}</span>
+                          {on && <span className="text-emerald-600">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <div className="flex items-center gap-3">
+                <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={data.ativo}
+                    onChange={(e) => setData((d) => ({ ...d, ativo: e.target.checked }))}
+                    className="h-4 w-4"
+                  />
+                  Ativo
+                </label>
+                {editId && (
+                  <button
+                    onClick={remove}
+                    className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100"
+                  >Apagar</button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={close} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50">Cancelar</button>
+                <button
+                  onClick={save}
+                  disabled={saving || !data.nome.trim()}
+                  className="rounded-md bg-emerald-600 px-4 py-1.5 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+                >{saving ? "A guardar…" : editId ? "Guardar" : "Criar"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -206,9 +438,9 @@ interface ImportRow {
 
 function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => void }) {
   const [editId, setEditId] = useState<string | null>(null);
-  const [editData, setEditData] = useState({ referencia: "", descricao: "", tipo: "" });
+  const [editData, setEditData] = useState({ referencia: "", descricao: "", tipo: "", tipo_caixa: "", qtd_por_caixa: "" });
   const [newRow, setNewRow] = useState(false);
-  const [newData, setNewData] = useState({ referencia: "", descricao: "", tipo: "" });
+  const [newData, setNewData] = useState({ referencia: "", descricao: "", tipo: "", tipo_caixa: "", qtd_por_caixa: "" });
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -228,7 +460,13 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
 
   const startEdit = (p: Produto) => {
     setEditId(p.id);
-    setEditData({ referencia: p.referencia, descricao: p.descricao, tipo: p.tipo ?? "" });
+    setEditData({
+      referencia: p.referencia ?? "",
+      descricao: p.descricao ?? "",
+      tipo: p.tipo ?? "",
+      tipo_caixa: p.tipo_caixa ?? "",
+      qtd_por_caixa: p.qtd_por_caixa != null ? String(p.qtd_por_caixa) : "",
+    });
   };
   const cancelEdit = () => setEditId(null);
 
@@ -239,6 +477,8 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
       referencia: editData.referencia.trim(),
       descricao: editData.descricao.trim(),
       tipo: editData.tipo.trim() || null,
+      tipo_caixa: editData.tipo_caixa || null,
+      qtd_por_caixa: editData.qtd_por_caixa === "" ? null : Number(editData.qtd_por_caixa),
     }).eq("id", editId);
     setSaving(false);
     if (error) toast.error("Erro ao guardar");
@@ -252,10 +492,12 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
       referencia: newData.referencia.trim(),
       descricao: newData.descricao.trim(),
       tipo: newData.tipo.trim() || null,
+      tipo_caixa: newData.tipo_caixa || null,
+      qtd_por_caixa: newData.qtd_por_caixa === "" ? null : Number(newData.qtd_por_caixa),
     });
     setSaving(false);
     if (error) toast.error("Erro ao criar");
-    else { toast.success("Produto criado"); setNewRow(false); setNewData({ referencia: "", descricao: "", tipo: "" }); refetch(); }
+    else { toast.success("Produto criado"); setNewRow(false); setNewData({ referencia: "", descricao: "", tipo: "", tipo_caixa: "", qtd_por_caixa: "" }); refetch(); }
   }, [newData, refetch]);
 
   const remove = useCallback(async (id: string) => {
@@ -435,9 +677,11 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-              <th className="px-4 py-3 w-36">Referência</th>
+              <th className="px-4 py-3 w-32">Referência</th>
               <th className="px-4 py-3">Descrição</th>
-              <th className="px-4 py-3 w-36">Tipo</th>
+              <th className="px-4 py-3 w-28">Tipo</th>
+              <th className="px-4 py-3 w-28">Caixa</th>
+              <th className="px-4 py-3 w-24 text-right">Qtd/Caixa</th>
               <th className="px-4 py-3 w-28 text-right">Ações</th>
             </tr>
           </thead>
@@ -463,6 +707,20 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
                         {TIPO_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </td>
+                    <td className="px-4 py-2">
+                      <select value={editData.tipo_caixa} onChange={(e) => setEditData((d) => ({ ...d, tipo_caixa: e.target.value }))}
+                        className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm">
+                        <option value="">—</option>
+                        <option value="termo">Termo</option>
+                        <option value="manual">Manual</option>
+                      </select>
+                    </td>
+                    <td className="px-4 py-2">
+                      <input type="number" min={0} value={editData.qtd_por_caixa} onChange={(e) => setEditData((d) => ({ ...d, qtd_por_caixa: e.target.value }))}
+                        className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm text-right"
+                        placeholder="—"
+                        onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") cancelEdit(); }} />
+                    </td>
                     <td className="px-4 py-2 text-right">
                       <button onClick={saveEdit} disabled={saving} className="mr-2 rounded-md bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-200">{saving ? "..." : "Guardar"}</button>
                       <button onClick={cancelEdit} className="rounded-md bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500 hover:bg-slate-200">Cancelar</button>
@@ -475,6 +733,11 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
                     <td className="px-4 py-2.5">
                       {p.tipo && <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{p.tipo}</span>}
                     </td>
+                    <td className="px-4 py-2.5">
+                      {p.tipo_caixa === "termo" && <span className="rounded-md bg-sky-100 px-2 py-0.5 text-xs font-extrabold text-sky-700" title="558×378×314 mm">Termo</span>}
+                      {p.tipo_caixa === "manual" && <span className="rounded-md bg-violet-100 px-2 py-0.5 text-xs font-extrabold text-violet-700" title="575×390×420 mm">Manual</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-bold tabular-nums text-slate-900">{p.qtd_por_caixa ?? <span className="text-slate-300">—</span>}</td>
                     <td className="px-4 py-2.5 text-right">
                       <button onClick={() => startEdit(p)} className="mr-2 rounded-md bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200">Editar</button>
                       <button onClick={() => remove(p.id)} className="rounded-md bg-red-50 px-3 py-1 text-xs font-bold text-red-600 hover:bg-red-100">Apagar</button>
@@ -486,7 +749,7 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
 
             {filtered.length === 0 && !newRow && (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-400">
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-400">
                   {search ? "Nenhum produto encontrado" : "Sem produtos registados"}
                 </td>
               </tr>
@@ -510,6 +773,20 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
                     <option value="">—</option>
                     {TIPO_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
+                </td>
+                <td className="px-4 py-2">
+                  <select value={newData.tipo_caixa} onChange={(e) => setNewData((d) => ({ ...d, tipo_caixa: e.target.value }))}
+                    className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm">
+                    <option value="">—</option>
+                    <option value="termo">Termo</option>
+                    <option value="manual">Manual</option>
+                  </select>
+                </td>
+                <td className="px-4 py-2">
+                  <input type="number" min={0} value={newData.qtd_por_caixa} onChange={(e) => setNewData((d) => ({ ...d, qtd_por_caixa: e.target.value }))}
+                    className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm text-right"
+                    placeholder="—"
+                    onKeyDown={(e) => { if (e.key === "Enter") addNew(); if (e.key === "Escape") setNewRow(false); }} />
                 </td>
                 <td className="px-4 py-2 text-right">
                   <button onClick={addNew} disabled={saving} className="mr-2 rounded-md bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-200">{saving ? "..." : "Adicionar"}</button>

@@ -8,14 +8,13 @@ import { SessionBadge } from "@/components/dashboard-auth-gate";
 import { usePessoaSession, logAction } from "@/hooks/use-pessoa-session";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { supabase } from "@/lib/supabase/client";
-import { KpisTab } from "./planeamento-kpis";
-import { AuditoriaTab } from "./planeamento-auditoria";
 import { OPsTab } from "./planeamento-ops";
 import { PedidosTab } from "./planeamento-pedidos";
 import { PlaneamentoSemanalTab } from "./planeamento-semanal";
-import { MetasTab } from "./planeamento-metas";
 import { GanttTab } from "./planeamento-gantt";
-import type { OrdemProducao, ZonaProducao, AuditLog, ProducaoRejeito, ProducaoPausa, MetaCategoria, PedidoProducao } from "@/lib/types";
+import { EquipasTab } from "./planeamento-equipas";
+import { PlaneamentoEOTab } from "./planeamento-eo";
+import type { OrdemProducao, ZonaProducao, AuditLog, ProducaoRejeito, ProducaoPausa, MetaCategoria, PedidoProducao, Funcionario, PaleteEO, Produto } from "@/lib/types";
 
 interface Props {
   initialZonas: ZonaProducao[];
@@ -25,24 +24,44 @@ interface Props {
   initialRejeitos: ProducaoRejeito[];
   initialPausas: ProducaoPausa[];
   initialMetas: MetaCategoria[];
+  initialFuncionarios: Funcionario[];
+  initialPaletes?: PaleteEO[];
+  initialProdutos?: Produto[];
 }
 
-type TabId = "kpis" | "planeamento_semanal" | "gantt" | "pedidos" | "ops" | "metas" | "auditoria" | "rejeitos" | "pausas";
+type TabId = "pedidos" | "planeamento_semanal" | "gantt" | "ops" | "equipas" | "eo";
 
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
-  { id: "kpis", label: "KPIs", icon: "📊" },
+  { id: "pedidos", label: "Pedidos de Produção", icon: "📥" },
   { id: "planeamento_semanal", label: "Planeamento Semanal", icon: "🗓" },
   { id: "gantt", label: "Gantt Semanal", icon: "📅" },
-  { id: "pedidos", label: "Pedidos de Produção", icon: "📥" },
   { id: "ops", label: "Ordens de Produção", icon: "📋" },
-  { id: "metas", label: "Metas", icon: "🎯" },
-  { id: "auditoria", label: "Histórico", icon: "📜" },
-  { id: "rejeitos", label: "Rejeitados", icon: "❌" },
-  { id: "pausas", label: "Paragens", icon: "⏸" },
+  { id: "eo", label: "Planeamento EO", icon: "🧪" },
+  { id: "equipas", label: "Equipas", icon: "👥" },
 ];
 
-export function PlaneamentoShell({ initialZonas, initialPedidos, initialOPs, initialAudit, initialRejeitos, initialPausas, initialMetas }: Props) {
-  const [tab, setTab] = useState<TabId>("kpis");
+const VALID_TABS: TabId[] = ["pedidos", "planeamento_semanal", "gantt", "ops", "equipas", "eo"];
+
+export function PlaneamentoShell({ initialZonas, initialPedidos, initialOPs, initialAudit, initialRejeitos, initialPausas, initialMetas, initialFuncionarios, initialPaletes = [], initialProdutos = [] }: Props) {
+  // initialAudit/initialRejeitos/initialPausas mantidos na assinatura por compatibilidade — agora consumidos em /producao/kpis
+  void initialAudit; void initialRejeitos; void initialPausas;
+  // Tab persistida na URL (?tab=...) — resolve ANTES de renderizar o conteúdo para evitar flash
+  const [tab, setTabState] = useState<TabId>("pedidos");
+  const [tabResolved, setTabResolved] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const q = new URLSearchParams(window.location.search).get("tab") as TabId | null;
+    if (q && VALID_TABS.includes(q)) setTabState(q);
+    setTabResolved(true);
+  }, []);
+  const setTab = (id: TabId) => {
+    setTabState(id);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", id);
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
   const { session, logout } = usePessoaSession();
 
   // Realtime: cada tabela mantém-se sincronizada via WebSocket; fallback de polling 60s embebido no hook
@@ -117,7 +136,7 @@ export function PlaneamentoShell({ initialZonas, initialPedidos, initialOPs, ini
             onClick={() => setTab(t.id)}
             className={cn(
               "rounded-t-lg border-b-2 px-4 py-2 text-sm font-extrabold transition-colors",
-              tab === t.id
+              tabResolved && tab === t.id
                 ? "border-emerald-500 text-emerald-700"
                 : "border-transparent text-slate-500 hover:text-slate-700"
             )}
@@ -127,26 +146,21 @@ export function PlaneamentoShell({ initialZonas, initialPedidos, initialOPs, ini
         ))}
       </div>
 
-      {/* CONTENT */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {tab === "kpis" && (
-          <KpisTab pedidos={pedidos} ops={ops} zonas={zonas} rejeitos={rejeitos} pausas={pausas} metas={metas} />
-        )}
-        {tab === "planeamento_semanal" && <PlaneamentoSemanalTab pedidos={pedidos} metas={metas} />}
-        {tab === "gantt" && <GanttTab pedidos={pedidos} ops={ops} zonas={zonas} />}
-        {tab === "pedidos" && <PedidosTab pedidos={pedidos} ops={ops} zonas={zonas} />}
-        {tab === "ops" && <OPsTab ops={ops} zonas={zonas} />}
-        {tab === "metas" && <MetasTab metas={metas} />}
-        {tab === "auditoria" && <AuditoriaTab audit={audit} />}
-        {tab === "rejeitos" && <RejeitosTab rejeitos={rejeitos} />}
-        {tab === "pausas" && <PausasTab pausas={pausas} />}
+      {/* CONTENT — só renderiza depois de resolver o tab da URL para evitar flash em refresh */}
+      <div className={cn("flex-1 p-4", tab === "equipas" || tab === "eo" ? "min-h-0 overflow-hidden" : "overflow-y-auto")}>
+        {tabResolved && tab === "planeamento_semanal" && <PlaneamentoSemanalTab pedidos={pedidos} metas={metas} />}
+        {tabResolved && tab === "gantt" && <GanttTab pedidos={pedidos} ops={ops} zonas={zonas} />}
+        {tabResolved && tab === "pedidos" && <PedidosTab pedidos={pedidos} ops={ops} zonas={zonas} />}
+        {tabResolved && tab === "ops" && <OPsTab ops={ops} pedidos={pedidos} zonas={zonas} />}
+        {tabResolved && tab === "equipas" && <EquipasTab zonas={zonas} initialFuncionarios={initialFuncionarios} />}
+        {tabResolved && tab === "eo" && <PlaneamentoEOTab ops={ops} initialPaletes={initialPaletes} initialProdutos={initialProdutos} />}
       </div>
     </div>
   );
 }
 
 /* ===== REJEITOS TAB ===== */
-function RejeitosTab({ rejeitos }: { rejeitos: ProducaoRejeito[] }) {
+export function RejeitosTab({ rejeitos }: { rejeitos: ProducaoRejeito[] }) {
   const total = rejeitos.reduce((a, r) => a + r.quantidade, 0);
   const porMotivo = rejeitos.reduce<Record<string, number>>((acc, r) => {
     acc[r.motivo] = (acc[r.motivo] ?? 0) + r.quantidade;
@@ -208,7 +222,7 @@ function RejeitosTab({ rejeitos }: { rejeitos: ProducaoRejeito[] }) {
 }
 
 /* ===== PAUSAS TAB ===== */
-function PausasTab({ pausas }: { pausas: ProducaoPausa[] }) {
+export function PausasTab({ pausas }: { pausas: ProducaoPausa[] }) {
   const totalMin = pausas.reduce((a, p) => a + (p.duracao_min ?? 0), 0);
   const porMotivo = pausas.reduce<Record<string, number>>((acc, p) => {
     acc[p.motivo] = (acc[p.motivo] ?? 0) + (p.duracao_min ?? 0);
