@@ -348,9 +348,9 @@ function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorD
           if (r.tipo === "dia") {
             const hoje = isSameDay(r.dia, new Date());
             return (
-              <li key={`dia-${r.idx}-${idx}`} className={cn("flex h-7 shrink-0 items-center justify-between rounded-md border px-2.5", hoje ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-slate-100")}>
-                <span className={cn("text-sm font-black uppercase tracking-wide", hoje ? "text-emerald-800" : "text-slate-700")}>{DIAS_LABEL[r.idx]} <span className="text-[11px] font-extrabold opacity-70">{fmtDate(r.dia)}{hoje && " · hoje"}</span></span>
-                <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-slate-600">{r.count}</span>
+              <li key={`dia-${r.idx}-${idx}`} style={{ height: 24 }} className={cn("flex flex-none items-center justify-between rounded px-2 text-[11px]", hoje ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600")}>
+                <span className="font-black uppercase tracking-wider">{DIAS_LABEL[r.idx]} <span className="opacity-70">{fmtDate(r.dia)}{hoje && " · hoje"}</span></span>
+                <span className="font-extrabold opacity-70">{r.count} ped.</span>
               </li>
             );
           }
