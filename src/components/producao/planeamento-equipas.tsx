@@ -57,7 +57,7 @@ export function EquipasTab({ zonas, initialFuncionarios }: Props) {
     const sexta = new Date(monday);
     sexta.setDate(sexta.getDate() + 4);
     const { data, error } = await supabase
-      .from("escala_funcionarios")
+      .from("escala_funcionario")
       .select("*")
       .gte("data", dataStr)
       .lte("data", toYYYYMMDD(sexta));
@@ -98,7 +98,7 @@ export function EquipasTab({ zonas, initialFuncionarios }: Props) {
       const exists = escala.some((e) => e.funcionario_id === funcId && e.zona_id === zonaId && e.data === dataStr);
       if (exists) return;
       const { data: inserted, error } = await supabase
-        .from("escala_funcionarios")
+        .from("escala_funcionario")
         .insert({ funcionario_id: funcId, data: dataStr, zona_id: zonaId })
         .select()
         .single();
@@ -108,13 +108,13 @@ export function EquipasTab({ zonas, initialFuncionarios }: Props) {
       const dataStr = toYYYYMMDD(viewMonday);
       const row = escala.find((e) => e.funcionario_id === funcId && e.zona_id === removeZonaId && e.data === dataStr);
       if (!row) return;
-      await supabase.from("escala_funcionarios").delete().eq("id", row.id);
+      await supabase.from("escala_funcionario").delete().eq("id", row.id);
       setEscala((prev) => prev.filter((e) => e.id !== row.id));
     } else {
       // clear all for this func in this week
       const dataStr = toYYYYMMDD(viewMonday);
       const toDelete = escala.filter((e) => e.funcionario_id === funcId && e.data === dataStr);
-      await supabase.from("escala_funcionarios").delete().in("id", toDelete.map((e) => e.id));
+      await supabase.from("escala_funcionario").delete().in("id", toDelete.map((e) => e.id));
       setEscala((prev) => prev.filter((e) => !(e.funcionario_id === funcId && e.data === dataStr)));
     }
   }

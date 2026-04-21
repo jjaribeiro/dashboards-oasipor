@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
@@ -8,29 +8,69 @@ import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 import type { Funcionario, Produto } from "@/lib/types";
 
+const ADMIN_EMAIL = "joaoribeiro@oasipor.pt";
+
+type Tab = "funcionarios" | "produtos" | "sugestoes";
+
 interface Props {
   initialFuncionarios: Funcionario[];
   initialProdutos?: Produto[];
 }
 
-export function DadosGrid({ initialFuncionarios }: Props) {
+export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) {
   const { items: funcionarios, refetch: refetchFunc } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
+  const { items: produtos, refetch: refetchProd } = useRealtimeTable<Produto>("produtos", initialProdutos, { orderBy: "referencia" });
+  const [tab, setTab] = useState<Tab>("funcionarios");
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user?.email === ADMIN_EMAIL) setIsAdmin(true);
+    });
+  }, []);
+
+  const tabs: { id: Tab; label: string; count?: number }[] = [
+    { id: "funcionarios", label: "Funcionários", count: funcionarios.length },
+    { id: "produtos", label: "Produtos", count: produtos.length },
+    ...(isAdmin ? [{ id: "sugestoes" as Tab, label: "Sugestões" }] : []),
+  ];
 
   return (
     <div className="mx-auto flex h-screen max-w-7xl flex-col gap-3 px-6 py-6">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <a href="/" className="flex items-center gap-2 text-slate-500 transition-colors hover:text-slate-900" title="Voltar ao hub">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-          </a>
-          <h1 className="text-2xl font-extrabold text-slate-900">Funcionários</h1>
-          <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{funcionarios.length}</span>
-        </div>
+      <div className="mb-2 flex items-center gap-4">
+        <a href="/" className="flex items-center gap-2 text-slate-500 transition-colors hover:text-slate-900" title="Voltar ao hub">
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+        </a>
+        <h1 className="text-2xl font-extrabold text-slate-900">Dados</h1>
       </div>
 
-      <GridFuncionarios items={funcionarios} refetch={refetchFunc} />
+      <div className="flex gap-1 border-b border-slate-200 pb-0">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-t px-4 py-2 text-sm font-bold transition-colors",
+              tab === t.id
+                ? "border-b-2 border-blue-600 text-blue-700"
+                : "text-slate-500 hover:text-slate-800"
+            )}
+          >
+            {t.label}
+            {t.count !== undefined && (
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-extrabold text-slate-600">{t.count}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        {tab === "funcionarios" && <GridFuncionarios items={funcionarios} refetch={refetchFunc} />}
+        {tab === "produtos" && <TabelaProdutos items={produtos} refetch={refetchProd} />}
+        {tab === "sugestoes" && isAdmin && <TabelaSugestoes />}
+      </div>
     </div>
   );
 }
@@ -856,6 +896,64 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
             + Novo Produto
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Tabela Sugestões — apenas admin
+   ============================================================ */
+type Sugestao = { id: string; texto: string; pagina: string | null; nome_pessoa: string | null; criado_em: string };
+
+function TabelaSugestoes() {
+  const [items, setItems] = useState<Sugestao[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.from("sugestoes").select("*").order("criado_em", { ascending: false }).then(({ data }) => {
+      setItems((data ?? []) as Sugestao[]);
+      setLoading(false);
+    });
+    const ch = supabase.channel("sugestoes_admin")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "sugestoes" }, (payload) => {
+        setItems((prev) => [payload.new as Sugestao, ...prev]);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, []);
+
+  async function apagar(id: string) {
+    if (!confirm("Apagar esta sugestão?")) return;
+    await supabase.from("sugestoes").delete().eq("id", id);
+    setItems((prev) => prev.filter((s) => s.id !== id));
+  }
+
+  if (loading) return <p className="py-10 text-center text-sm text-slate-400">A carregar…</p>;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white">
+      <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-3">
+        <h2 className="font-extrabold text-slate-900">Sugestões de Melhoria</h2>
+        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{items.length}</span>
+      </div>
+      {items.length === 0 && (
+        <p className="py-10 text-center text-sm text-slate-400">Ainda não há sugestões.</p>
+      )}
+      <div className="divide-y divide-slate-100">
+        {items.map((s) => (
+          <div key={s.id} className="flex items-start gap-4 px-5 py-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-900">{s.texto}</p>
+              <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-slate-400">
+                {s.nome_pessoa && <span className="font-semibold text-slate-600">👤 {s.nome_pessoa}</span>}
+                {s.pagina && <span>📄 {s.pagina}</span>}
+                <span>{new Date(s.criado_em).toLocaleString("pt-PT")}</span>
+              </div>
+            </div>
+            <button onClick={() => apagar(s.id)} className="shrink-0 rounded-md px-2 py-1 text-xs font-bold text-slate-400 hover:bg-red-50 hover:text-red-600">✕</button>
+          </div>
+        ))}
       </div>
     </div>
   );

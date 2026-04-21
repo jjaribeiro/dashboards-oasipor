@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Toaster } from "@/components/ui/sonner";
+import { FeedbackButton } from "@/components/feedback-button";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,6 +23,7 @@ export default function RootLayout({
       </head>
       <body className="h-full overflow-hidden bg-slate-50 text-slate-900 font-semibold" style={{ fontFamily: "'Inter', sans-serif" }}>
         {children}
+        <FeedbackButton />
         <Toaster position="bottom-right" />
       </body>
     </html>

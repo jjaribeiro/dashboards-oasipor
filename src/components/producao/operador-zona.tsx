@@ -166,8 +166,11 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
   const equipa = funcionarios.filter((f) => {
     if (!f.ativo) return false;
     if (escalaHoje.has(f.id)) return true;
-    // fallback: se não há escala de hoje para esta zona, usa zona_atual
-    if (escalaHoje.size === 0 && f.zona_atual && zonasParaEquipa.includes(f.zona_atual)) return true;
+    // fallback: se não há escala de hoje para esta zona, usa zona_atual ou zonas_atuais
+    if (escalaHoje.size === 0) {
+      if (f.zona_atual && zonasParaEquipa.includes(f.zona_atual)) return true;
+      if (f.zonas_atuais?.some((z) => zonasParaEquipa.includes(z))) return true;
+    }
     return false;
   });
 
