@@ -204,63 +204,7 @@ export function QualidadeTvPanel({ ops: initialOps, pedidos: initialPedidos, ini
 
         {/* CQ / Manutenção */}
         <Section title="🔍 CQ / Manutenção solicitado" badge={`${cqSolicitado.length + manutencaoPedidos.length}`} accent="sky">
-          <div className="flex-1 overflow-y-auto p-2">
-            {cqSolicitado.length === 0 && manutencaoPedidos.length === 0 ? (
-              <p className="py-12 text-center text-sm font-bold text-slate-400">Sem pedidos pendentes 🎉</p>
-            ) : (
-              <ul className="space-y-2">
-                {cqSolicitado.map(({ inspecao, op }) => {
-                  const ped = op.pedido_id ? pedidoPorId.get(op.pedido_id) : null;
-                  return (
-                  <li key={inspecao.id}>
-                    <button onClick={() => setCqInspecao({ op, pendente: inspecao })} className="flex w-full flex-col items-start gap-1 overflow-hidden rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-left shadow-sm hover:border-sky-400 hover:bg-sky-100">
-                      <div className="flex w-full items-center gap-2">
-                        <span className="rounded bg-sky-600 px-2 py-0.5 text-sm font-extrabold text-white shrink-0">CQ SOLICITADO</span>
-                        <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-sm font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {op.produto_codigo ?? "—"}</span>
-                        <span className="truncate text-lg font-black text-slate-900">{op.produto_nome}</span>
-                        <span className="ml-auto text-sm font-bold text-slate-500 shrink-0" suppressHydrationWarning>{new Date(inspecao.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
-                      </div>
-                      <div className="flex w-full items-center gap-2 text-sm font-bold">
-                        {op.lote ? (
-                          <span className="rounded bg-lime-100 px-2 py-0.5 font-mono font-extrabold text-lime-700 shrink-0" title="Lote">LT {op.lote}</span>
-                        ) : (
-                          <span className="rounded bg-amber-100 px-2 py-0.5 font-extrabold text-amber-700 shrink-0">sem lote</span>
-                        )}
-                        {ped?.ficha_producao && <span className="rounded bg-indigo-100 px-2 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {ped.ficha_producao}</span>}
-                        {ped?.numero && <span className="rounded bg-sky-100 px-2 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {ped.numero}</span>}
-                        {op.numero && <span className="rounded bg-violet-100 px-2 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {op.numero}</span>}
-                      </div>
-                      <span className="truncate text-sm font-bold text-slate-600">{ZONA_LABEL[op.zona_id] ?? op.zona_id}</span>
-                      <span className="truncate text-sm font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"}</span>
-                    </button>
-                  </li>
-                  );
-                })}
-                {manutencaoPedidos.map((log) => {
-                  const det = (log.detalhes as Record<string, string> | null) ?? null;
-                  return (
-                  <li key={log.id}>
-                    <div className="flex flex-col gap-1 overflow-hidden rounded-lg border border-orange-200 bg-orange-50 px-4 py-2.5 shadow-sm">
-                      <div className="flex w-full items-center gap-2">
-                        <span className="rounded bg-orange-600 px-2 py-0.5 text-sm font-extrabold text-white shrink-0">🔧 MANUTENÇÃO</span>
-                        {det?.produto_codigo && <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-sm font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {det.produto_codigo}</span>}
-                        <span className="truncate text-lg font-black text-slate-900">{det?.produto ?? "—"}</span>
-                        <span className="ml-auto text-sm font-bold text-slate-500 shrink-0" suppressHydrationWarning>{new Date(log.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
-                      </div>
-                      <div className="flex w-full items-center gap-2 text-sm font-bold">
-                        {det?.lote && <span className="rounded bg-lime-100 px-2 py-0.5 font-mono font-extrabold text-lime-700 shrink-0" title="Lote">LT {det.lote}</span>}
-                        {det?.pp_numero && <span className="rounded bg-sky-100 px-2 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {det.pp_numero}</span>}
-                        {det?.op_numero && <span className="rounded bg-violet-100 px-2 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {det.op_numero}</span>}
-                      </div>
-                      <span className="truncate text-sm font-bold text-slate-600">{log.zona_id ? (ZONA_LABEL[log.zona_id as keyof typeof ZONA_LABEL] ?? log.zona_id) : "—"}</span>
-                      <span className="truncate text-sm font-bold text-slate-500">{log.pessoa_nome ?? "—"}</span>
-                    </div>
-                  </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
+          <CqManutencaoCarousel cqSolicitado={cqSolicitado} manutencaoPedidos={manutencaoPedidos} pedidoPorId={pedidoPorId} onClickCq={(cq) => setCqInspecao(cq)} />
           <NcsAbertas lista={ncsAbertas} />
         </Section>
       </div>
@@ -305,13 +249,10 @@ const ROTULAGEM_PER_PAGE = 4;
 const ROTULAGEM_ROTATION_SECONDS = 15;
 
 function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorDia: PedidoProducao[][] }) {
-  type Row = { tipo: "dia"; dia: Date; idx: number; count: number } | { tipo: "pedido"; pedido: PedidoProducao };
-  const flat = useMemo<Row[]>(() => {
-    const arr: Row[] = [];
+  const flat = useMemo(() => {
+    const arr: { pedido: PedidoProducao; diaIdx: number; dia: Date }[] = [];
     for (let i = 0; i < days.length; i++) {
-      const lista = planeadoPorDia[i];
-      arr.push({ tipo: "dia", dia: days[i], idx: i, count: lista.length });
-      for (const p of lista) arr.push({ tipo: "pedido", pedido: p });
+      for (const p of planeadoPorDia[i]) arr.push({ pedido: p, diaIdx: i, dia: days[i] });
     }
     return arr;
   }, [days, planeadoPorDia]);
@@ -329,6 +270,10 @@ function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorD
 
   const pageRows = flat.slice(page * ROTULAGEM_PER_PAGE, (page + 1) * ROTULAGEM_PER_PAGE);
 
+  if (flat.length === 0) {
+    return <div className="flex-1 p-2"><p className="py-12 text-center text-sm font-bold text-slate-400">Nada planeado 🎉</p></div>;
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {needsCarousel && (
@@ -341,20 +286,12 @@ function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorD
           <div key={`${page}-${totalPages}`} className="h-full bg-blue-400" style={{ animation: `progressFill ${ROTULAGEM_ROTATION_SECONDS}s linear` }} />
         </div>
       )}
-      <ul className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-2">
+      <ul className="grid min-h-0 flex-1 grid-rows-4 gap-2 overflow-hidden p-2">
         {pageRows.map((r, idx) => {
-          if (r.tipo === "dia") {
-            const hoje = isSameDay(r.dia, new Date());
-            return (
-              <li key={`dia-${r.idx}-${idx}`} style={{ height: 24 }} className={cn("flex flex-none items-center justify-between rounded px-2 text-[11px]", hoje ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600")}>
-                <span className="font-black uppercase tracking-wider">{DIAS_LABEL[r.idx]} <span className="opacity-70">{fmtDate(r.dia)}{hoje && " · hoje"}</span></span>
-                <span className="font-extrabold opacity-70">{r.count} ped.</span>
-              </li>
-            );
-          }
           const p = r.pedido;
+          const hoje = isSameDay(r.dia, new Date());
           return (
-            <li key={`p-${p.id}-${idx}`} className="flex flex-none flex-col gap-1 overflow-hidden rounded-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
+            <li key={`p-${p.id}-${idx}`} className="relative flex min-h-0 flex-col justify-center gap-1 overflow-hidden rounded-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
               <div className="flex w-full items-center gap-2">
                 <span className={cn("rounded border px-2 py-0.5 text-sm font-extrabold shrink-0", PRIORIDADE_OP_COR[p.prioridade])}>{PRIORIDADE_OP_LABEL[p.prioridade]}</span>
                 <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-sm font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {p.produto_codigo ?? "—"}</span>
@@ -366,7 +303,10 @@ function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorD
                 {p.ficha_producao && <span className="rounded bg-indigo-100 px-2 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {p.ficha_producao}</span>}
                 {p.numero && <span className="rounded bg-sky-100 px-2 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {p.numero}</span>}
               </div>
-              <span className="truncate text-sm font-bold text-slate-500">{p.cliente ?? "—"}</span>
+              <span className="truncate text-sm font-bold text-slate-500 pr-24">{p.cliente ?? "—"}</span>
+              <span className={cn("absolute bottom-2 right-3 rounded px-2 py-0.5 text-xs font-black uppercase tracking-wider", hoje ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600")}>
+                {DIAS_LABEL[r.diaIdx]} {fmtDate(r.dia)}{hoje && " · HOJE"}
+              </span>
             </li>
           );
         })}
@@ -439,6 +379,105 @@ function RotulagemCarousel({ ops, pedidoPorId }: { ops: OrdemProducao[]; pedidoP
               </div>
               <span className="truncate text-sm font-bold text-slate-600">{ZONA_LABEL[op.zona_id] ?? op.zona_id}</span>
               <span className="truncate text-sm font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+type CqItem = { kind: "cq"; inspecao: CqInspecao; op: OrdemProducao } | { kind: "manu"; log: AuditLog };
+
+function CqManutencaoCarousel({ cqSolicitado, manutencaoPedidos, pedidoPorId, onClickCq }: {
+  cqSolicitado: { inspecao: CqInspecao; op: OrdemProducao }[];
+  manutencaoPedidos: AuditLog[];
+  pedidoPorId: Map<string, PedidoProducao>;
+  onClickCq: (cq: { op: OrdemProducao; pendente: CqInspecao }) => void;
+}) {
+  const flat = useMemo<CqItem[]>(() => {
+    const arr: CqItem[] = [];
+    for (const c of cqSolicitado) arr.push({ kind: "cq", inspecao: c.inspecao, op: c.op });
+    for (const l of manutencaoPedidos) arr.push({ kind: "manu", log: l });
+    return arr;
+  }, [cqSolicitado, manutencaoPedidos]);
+
+  const totalPages = Math.max(1, Math.ceil(flat.length / ROTULAGEM_PER_PAGE));
+  const needsCarousel = totalPages > 1;
+  const [page, setPage] = useState(0);
+
+  useEffect(() => { if (page >= totalPages) setPage(0); }, [page, totalPages]);
+  useEffect(() => {
+    if (!needsCarousel) return;
+    const id = setInterval(() => setPage((p) => (p + 1) % totalPages), ROTULAGEM_ROTATION_SECONDS * 1000);
+    return () => clearInterval(id);
+  }, [needsCarousel, totalPages]);
+
+  if (flat.length === 0) {
+    return <div className="flex-1 p-2"><p className="py-12 text-center text-sm font-bold text-slate-400">Sem pedidos pendentes 🎉</p></div>;
+  }
+
+  const pageItems = flat.slice(page * ROTULAGEM_PER_PAGE, (page + 1) * ROTULAGEM_PER_PAGE);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {needsCarousel && (
+        <div className="flex items-center justify-end border-b border-slate-100 bg-slate-50/60 px-3 py-1">
+          <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">{page + 1}/{totalPages}</span>
+        </div>
+      )}
+      {needsCarousel && (
+        <div className="h-1 w-full bg-slate-100">
+          <div key={`${page}-${totalPages}`} className="h-full bg-blue-400" style={{ animation: `progressFill ${ROTULAGEM_ROTATION_SECONDS}s linear` }} />
+        </div>
+      )}
+      <ul className="grid min-h-0 flex-1 grid-rows-4 gap-2 overflow-hidden p-2">
+        {pageItems.map((it, idx) => {
+          if (it.kind === "cq") {
+            const { inspecao, op } = it;
+            const ped = op.pedido_id ? pedidoPorId.get(op.pedido_id) : null;
+            return (
+              <li key={`cq-${inspecao.id}-${idx}`}>
+                <button onClick={() => onClickCq({ op, pendente: inspecao })} className="flex h-full w-full min-h-0 flex-col justify-center gap-1 overflow-hidden rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-left shadow-sm hover:border-sky-400 hover:bg-sky-100">
+                  <div className="flex w-full items-center gap-2">
+                    <span className="rounded bg-sky-600 px-2 py-0.5 text-sm font-extrabold text-white shrink-0">CQ SOLICITADO</span>
+                    <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-sm font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {op.produto_codigo ?? "—"}</span>
+                    <span className="truncate text-lg font-black text-slate-900">{op.produto_nome}</span>
+                    <span className="ml-auto text-sm font-bold text-slate-500 shrink-0" suppressHydrationWarning>{new Date(inspecao.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                  <div className="flex w-full items-center gap-2 text-sm font-bold">
+                    {op.lote ? (
+                      <span className="rounded bg-lime-100 px-2 py-0.5 font-mono font-extrabold text-lime-700 shrink-0" title="Lote">LT {op.lote}</span>
+                    ) : (
+                      <span className="rounded bg-amber-100 px-2 py-0.5 font-extrabold text-amber-700 shrink-0">sem lote</span>
+                    )}
+                    {ped?.ficha_producao && <span className="rounded bg-indigo-100 px-2 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {ped.ficha_producao}</span>}
+                    {ped?.numero && <span className="rounded bg-sky-100 px-2 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {ped.numero}</span>}
+                    {op.numero && <span className="rounded bg-violet-100 px-2 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {op.numero}</span>}
+                  </div>
+                  <span className="truncate text-sm font-bold text-slate-600">{ZONA_LABEL[op.zona_id] ?? op.zona_id}</span>
+                  <span className="truncate text-sm font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"}</span>
+                </button>
+              </li>
+            );
+          }
+          const log = it.log;
+          const det = (log.detalhes as Record<string, string> | null) ?? null;
+          return (
+            <li key={`manu-${log.id}-${idx}`} className="flex min-h-0 flex-col justify-center gap-1 overflow-hidden rounded-lg border border-orange-200 bg-orange-50 px-4 py-2.5 shadow-sm">
+              <div className="flex w-full items-center gap-2">
+                <span className="rounded bg-orange-600 px-2 py-0.5 text-sm font-extrabold text-white shrink-0">🔧 MANUTENÇÃO</span>
+                {det?.produto_codigo && <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-sm font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {det.produto_codigo}</span>}
+                <span className="truncate text-lg font-black text-slate-900">{det?.produto ?? "—"}</span>
+                <span className="ml-auto text-sm font-bold text-slate-500 shrink-0" suppressHydrationWarning>{new Date(log.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
+              </div>
+              <div className="flex w-full items-center gap-2 text-sm font-bold">
+                {det?.lote && <span className="rounded bg-lime-100 px-2 py-0.5 font-mono font-extrabold text-lime-700 shrink-0" title="Lote">LT {det.lote}</span>}
+                {det?.pp_numero && <span className="rounded bg-sky-100 px-2 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {det.pp_numero}</span>}
+                {det?.op_numero && <span className="rounded bg-violet-100 px-2 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {det.op_numero}</span>}
+              </div>
+              <span className="truncate text-sm font-bold text-slate-600">{log.zona_id ? (ZONA_LABEL[log.zona_id as keyof typeof ZONA_LABEL] ?? log.zona_id) : "—"}</span>
+              <span className="truncate text-sm font-bold text-slate-500">{log.pessoa_nome ?? "—"}</span>
             </li>
           );
         })}
