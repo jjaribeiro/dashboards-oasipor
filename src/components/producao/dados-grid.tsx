@@ -20,21 +20,30 @@ export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) 
   const { items: funcionarios, refetch: refetchFunc } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
   const { items: produtos, refetch: refetchProd } = useRealtimeTable<Produto>("produtos", initialProdutos, { orderBy: "referencia" });
   const [tab, setTab] = useState<Tab>("funcionarios");
-  const { session, login } = usePessoaSession();
+  const { session } = usePessoaSession();
   const [pinInput, setPinInput] = useState("");
   const [pinOpen, setPinOpen] = useState(false);
   const [pinError, setPinError] = useState(false);
+  const [adminNome, setAdminNome] = useState<string | null>(null);
+
+  const adminName = adminNome ?? (session?.pessoaNome ?? null);
 
   const isAdmin = useMemo(() => {
-    if (!session) return false;
-    const func = funcionarios.find((f) => f.nome === session.pessoaNome);
+    if (!adminName) return false;
+    const func = funcionarios.find((f) => f.nome === adminName);
     return func?.acessos?.includes("dados") ?? false;
-  }, [session, funcionarios]);
+  }, [adminName, funcionarios]);
 
   async function handlePinLogin() {
     setPinError(false);
-    const pessoa = await login(pinInput.trim());
-    if (!pessoa) { setPinError(true); return; }
+    const { data } = await supabase
+      .from("funcionarios")
+      .select("id, nome, acessos")
+      .eq("pin", pinInput.trim())
+      .eq("ativo", true)
+      .maybeSingle();
+    if (!data) { setPinError(true); return; }
+    setAdminNome(data.nome);
     setPinInput("");
     setPinOpen(false);
   }
@@ -55,8 +64,8 @@ export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) 
         </a>
         <h1 className="text-2xl font-extrabold text-slate-900">Dados</h1>
         <div className="ml-auto flex items-center gap-2">
-          {session ? (
-            <span className="text-xs font-bold text-slate-500">{session.pessoaNome}</span>
+          {adminName ? (
+            <span className="text-xs font-bold text-slate-500">{adminName}</span>
           ) : (
             <button
               onClick={() => setPinOpen(true)}
@@ -111,7 +120,7 @@ export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) 
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {tab === "funcionarios" && <GridFuncionarios items={funcionarios} refetch={refetchFunc} pessoaNome={session?.pessoaNome} />}
+        {tab === "funcionarios" && <GridFuncionarios items={funcionarios} refetch={refetchFunc} pessoaNome={adminName ?? undefined} />}
         {tab === "produtos" && <TabelaProdutos items={produtos} refetch={refetchProd} />}
         {tab === "sugestoes" && isAdmin && <TabelaSugestoes />}
       </div>
