@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { usePessoaSession } from "@/hooks/use-pessoa-session";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 import type { Funcionario, Produto } from "@/lib/types";
-
-const ADMIN_EMAIL = "joaoribeiro@oasipor.pt";
 
 type Tab = "funcionarios" | "produtos" | "sugestoes";
 
@@ -21,13 +20,13 @@ export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) 
   const { items: funcionarios, refetch: refetchFunc } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
   const { items: produtos, refetch: refetchProd } = useRealtimeTable<Produto>("produtos", initialProdutos, { orderBy: "referencia" });
   const [tab, setTab] = useState<Tab>("funcionarios");
-  const [isAdmin, setIsAdmin] = useState(false);
+  const { session } = usePessoaSession();
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user?.email === ADMIN_EMAIL) setIsAdmin(true);
-    });
-  }, []);
+  const isAdmin = useMemo(() => {
+    if (!session) return false;
+    const func = funcionarios.find((f) => f.nome === session.pessoaNome);
+    return func?.acessos?.includes("dados") ?? false;
+  }, [session, funcionarios]);
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "funcionarios", label: "Funcionários", count: funcionarios.length },
