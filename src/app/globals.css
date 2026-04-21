@@ -200,8 +200,6 @@
   scrollbar-width: none;
 }
 /* Scale common Tailwind text sizes ~40% bigger for 3m viewing distance */
-.kiosk .text-\[10px\] { font-size: 14px; line-height: 16px; }
-.kiosk .text-\[11px\] { font-size: 15px; line-height: 18px; }
 .kiosk .text-xs { font-size: 16px; line-height: 20px; }
 .kiosk .text-sm { font-size: 18px; line-height: 24px; }
 .kiosk .text-base { font-size: 22px; line-height: 28px; }
