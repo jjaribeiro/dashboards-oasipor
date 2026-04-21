@@ -288,24 +288,25 @@ function OPRow({ op, principal, onClick, showLinha, draggable = true }: { op: Or
         )}
       </p>
 
-      {/* Linha 3: OP + cliente + datas */}
-      <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden text-sm font-bold text-slate-400">
-        {infoSegments.length > 0 && (
-          <span className="truncate text-slate-500">{infoSegments.join(" · ")}</span>
-        )}
-        {(op.inicio_previsto || op.fim_previsto) && infoSegments.length > 0 && (
-          <span className="text-slate-200">|</span>
-        )}
-        {op.inicio_previsto && (
-          <span suppressHydrationWarning>▸{formatShortDateTime(op.inicio_previsto)}</span>
-        )}
-        {op.inicio_previsto && op.fim_previsto && <span className="text-slate-200">→</span>}
-        {op.fim_previsto && (
-          <span suppressHydrationWarning className={cn(atraso && "text-red-500")}>
-            ■{formatShortDateTime(op.fim_previsto)}
-          </span>
-        )}
-      </div>
+      {/* Linha 3a: OP + cliente — linha própria para não cortar cliente */}
+      {infoSegments.length > 0 && (
+        <p className="mt-0.5 truncate text-sm font-bold text-slate-500">{infoSegments.join(" · ")}</p>
+      )}
+
+      {/* Linha 3b: datas inline (start → end) */}
+      {(op.inicio_previsto || op.fim_previsto) && (
+        <div className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap text-xs font-bold text-slate-400">
+          {op.inicio_previsto && (
+            <span suppressHydrationWarning>▸ {formatShortDateTime(op.inicio_previsto)}</span>
+          )}
+          {op.inicio_previsto && op.fim_previsto && <span className="text-slate-300">→</span>}
+          {op.fim_previsto && (
+            <span suppressHydrationWarning className={cn(atraso && "text-red-500")}>
+              ■ {formatShortDateTime(op.fim_previsto)}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Linha 4: barra de progresso */}
       {op.quantidade_alvo > 0 && (
