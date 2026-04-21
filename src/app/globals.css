@@ -189,7 +189,7 @@
   animation: bannerFlash 2s ease-in-out infinite;
 }
 
-/* Kiosk mode — hide cursor and scrollbars */
+/* Kiosk mode — hide cursor/scrollbars and scale text up for TV readability */
 .kiosk {
   cursor: none;
 }
@@ -199,4 +199,14 @@
 .kiosk * {
   scrollbar-width: none;
 }
+/* Scale common Tailwind text sizes ~40% bigger for 3m viewing distance */
+.kiosk .text-\[10px\] { font-size: 14px; line-height: 16px; }
+.kiosk .text-\[11px\] { font-size: 15px; line-height: 18px; }
+.kiosk .text-xs { font-size: 16px; line-height: 20px; }
+.kiosk .text-sm { font-size: 18px; line-height: 24px; }
+.kiosk .text-base { font-size: 22px; line-height: 28px; }
+.kiosk .text-lg { font-size: 26px; line-height: 32px; }
+.kiosk .text-xl { font-size: 30px; line-height: 36px; }
+.kiosk .text-2xl { font-size: 36px; line-height: 42px; }
+.kiosk .text-3xl { font-size: 44px; line-height: 50px; }
 

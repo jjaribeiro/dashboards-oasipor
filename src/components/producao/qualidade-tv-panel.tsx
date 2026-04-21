@@ -199,13 +199,11 @@ export function QualidadeTvPanel({ ops: initialOps, pedidos: initialPedidos, ini
         {/* Rotulagem */}
         <Section title="🏷️ Rotulagem pendente" badge={`${rotulagemPendente.length}`} accent="lime">
           <RotulagemCarousel ops={rotulagemPendente} pedidoPorId={pedidoPorId} />
-          <HistoricoRotulagem lista={rotulagem} />
         </Section>
 
         {/* CQ / Manutenção */}
         <Section title="🔍 CQ / Manutenção solicitado" badge={`${cqSolicitado.length + manutencaoPedidos.length}`} accent="sky">
           <CqManutencaoCarousel cqSolicitado={cqSolicitado} manutencaoPedidos={manutencaoPedidos} pedidoPorId={pedidoPorId} onClickCq={(cq) => setCqInspecao(cq)} />
-          <NcsAbertas lista={ncsAbertas} />
         </Section>
       </div>
 
