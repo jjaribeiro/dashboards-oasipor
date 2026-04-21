@@ -82,9 +82,10 @@ export function useRealtimeTable<T extends { id: string }>(
           if (!matchesFilter(newRow)) return prev.filter((x) => x.id !== nr.id);
           const idx = prev.findIndex((x) => x.id === nr.id);
           if (idx === -1) return sortItems([...prev, nr]);
+          // Atualizar in-place sem re-sort: evita saltos de posição ao editar campos
           const next = [...prev];
           next[idx] = nr;
-          return sortItems(next);
+          return next;
         }
         return prev;
       });

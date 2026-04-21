@@ -209,6 +209,7 @@ export interface Funcionario {
   iniciais: string | null;
   cor: string | null;
   zona_atual: ZonaId | null;
+  zonas_atuais: ZonaId[];
   ativo: boolean;
   email: string | null;
   departamento: string | null;
@@ -311,6 +312,7 @@ export interface OrdemProducao {
   responsavel: string | null;
   notas: string | null;
   op_anterior_id: string | null;
+  fase_atual: "setup" | "producao" | "limpeza" | null;
   bloqueada: boolean;
   palete_eo_id: string | null;
   num_caixas: number | null;

@@ -84,41 +84,60 @@ export function EquipaPresencaPanel({ zonaId, equipa }: Props) {
 
   return (
     <>
-      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+      <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm min-w-[220px]">
+        {/* Contadores */}
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Equipa</span>
           <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-extrabold text-emerald-700">{counts.presente} presente{counts.presente === 1 ? "" : "s"}</span>
           {counts.pausa > 0 && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-700">{counts.pausa} pausa</span>}
           {counts.ausente > 0 && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-extrabold text-slate-600">{counts.ausente} ausente{counts.ausente === 1 ? "" : "s"}</span>}
         </div>
-        <div className="ml-2 flex flex-wrap gap-1">
+        {/* Lista de operadores com botão de registo claro */}
+        <div className="flex flex-col gap-1">
           {equipa.map((f) => {
             const estado = estadoPorId.get(f.id) ?? "ausente";
-            const coresBadge: Record<EstadoPresenca, string> = {
-              presente: "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100",
-              em_pausa: "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
-              ausente: "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100",
+            const estadoConfig: Record<EstadoPresenca, { label: string; dot: string; row: string; btn: string }> = {
+              presente: {
+                label: "Presente",
+                dot: "bg-emerald-500",
+                row: "bg-emerald-50 border-emerald-200",
+                btn: "bg-emerald-100 text-emerald-700 hover:bg-emerald-200",
+              },
+              em_pausa: {
+                label: "Em pausa",
+                dot: "bg-amber-500",
+                row: "bg-amber-50 border-amber-200",
+                btn: "bg-amber-100 text-amber-700 hover:bg-amber-200",
+              },
+              ausente: {
+                label: "Ausente",
+                dot: "bg-slate-300",
+                row: "bg-white border-slate-200",
+                btn: "bg-slate-100 text-slate-500 hover:bg-slate-200",
+              },
             };
-            const dot: Record<EstadoPresenca, string> = {
-              presente: "bg-emerald-500",
-              em_pausa: "bg-amber-500",
-              ausente: "bg-slate-300",
-            };
+            const cfg = estadoConfig[estado];
             return (
               <button
                 key={f.id}
                 onClick={() => setPinOpen({ funcionario: f, estadoAtual: estado })}
-                className={cn("group inline-flex items-center gap-1.5 rounded-full border-2 py-0.5 pl-0.5 pr-2 text-xs font-bold transition-colors", coresBadge[estado])}
-                title={`${f.nome} — ${estado}`}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition-colors",
+                  cfg.row
+                )}
+                title={`${f.nome} — clica para registar entrada/saída`}
               >
                 <span
-                  className="relative inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[9px] font-extrabold text-white"
+                  className="relative shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-full text-[9px] font-extrabold text-white"
                   style={{ backgroundColor: f.cor ?? "#64748b" }}
                 >
                   {f.iniciais ?? f.nome[0]}
-                  <span className={cn("absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-1 ring-white", dot[estado])} />
+                  <span className={cn("absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-1 ring-white", cfg.dot)} />
                 </span>
-                {f.nome.split(" ")[0]}
+                <span className="flex-1 text-xs font-bold text-slate-800 leading-tight">{f.nome}</span>
+                <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase shrink-0", cfg.btn)}>
+                  {cfg.label}
+                </span>
               </button>
             );
           })}

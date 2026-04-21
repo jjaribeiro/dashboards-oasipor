@@ -17,7 +17,7 @@ export function DadosGrid({ initialFuncionarios }: Props) {
   const { items: funcionarios, refetch: refetchFunc } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
 
   return (
-    <div className="mx-auto flex h-screen max-w-7xl flex-col px-6 py-6">
+    <div className="mx-auto flex h-screen max-w-7xl flex-col gap-3 px-6 py-6">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <a href="/" className="flex items-center gap-2 text-slate-500 transition-colors hover:text-slate-900" title="Voltar ao hub">
@@ -30,9 +30,7 @@ export function DadosGrid({ initialFuncionarios }: Props) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <GridFuncionarios items={funcionarios} refetch={refetchFunc} />
-      </div>
+      <GridFuncionarios items={funcionarios} refetch={refetchFunc} />
     </div>
   );
 }
@@ -40,6 +38,8 @@ export function DadosGrid({ initialFuncionarios }: Props) {
 /* ============================================================
    Grid Funcionários — cards compactos com edição rápida
    ============================================================ */
+const TIPO_OPTIONS = ["mascaras", "toucas", "campos", "laminados", "stock", "outros"] as const;
+
 const PRESET_COLORS = [
   "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e",
   "#10b981", "#14b8a6", "#06b6d4", "#0ea5e9", "#3b82f6", "#6366f1",
@@ -154,7 +154,7 @@ function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: (
   const iniciaisPreview = (data.iniciais || data.nome.split(/\s+/).map((p) => p[0]).slice(0, 2).join("")).toUpperCase() || "?";
 
   return (
-    <div className="space-y-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {/* Toolbar */}
       <div className="flex items-center gap-2">
         <input
@@ -174,16 +174,16 @@ function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: (
       </div>
 
       {/* Tabela */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+          <thead className="sticky top-0 z-10 bg-slate-50">
+            <tr className="border-b border-slate-200 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <th className="px-4 py-3">Nome</th>
               <th className="px-4 py-3 w-20">Iniciais</th>
               <th className="px-4 py-3 w-36">Departamento</th>
               <th className="px-4 py-3 w-36">Função</th>
               <th className="px-4 py-3 w-24">PIN</th>
-              <th className="px-4 py-3 w-28">Acessos</th>
+              <th className="px-4 py-3 w-48">Acessos</th>
               <th className="px-4 py-3 w-20 text-center">Estado</th>
               <th className="px-4 py-3 w-20 text-right">Ações</th>
             </tr>
@@ -218,10 +218,13 @@ function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: (
                   }
                 </td>
                 <td className="px-4 py-2.5">
-                  <div className="flex flex-wrap gap-0.5">
-                    {(f.acessos ?? []).map((a) => (
-                      <span key={a} className="rounded bg-slate-100 px-1 py-0.5 text-[9px] font-bold uppercase text-slate-600">{a}</span>
+                  <div className="flex flex-wrap gap-0.5 max-w-[160px]">
+                    {(f.acessos ?? []).slice(0, 4).map((a) => (
+                      <span key={a} className="rounded bg-slate-800 px-1.5 py-0.5 text-[8px] font-extrabold uppercase text-white">{a}</span>
                     ))}
+                    {(f.acessos ?? []).length > 4 && (
+                      <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[8px] font-extrabold text-slate-600" title={(f.acessos ?? []).slice(4).join(", ")}>+{(f.acessos ?? []).length - 4}</span>
+                    )}
                     {(f.acessos ?? []).length === 0 && <span className="text-slate-300 text-[11px]">—</span>}
                   </div>
                 </td>

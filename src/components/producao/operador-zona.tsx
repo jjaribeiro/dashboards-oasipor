@@ -108,6 +108,10 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
   const [confirmConcluir, setConfirmConcluir] = useState<OrdemProducao | null>(null);
   const [confirmAutoEmbalamento, setConfirmAutoEmbalamento] = useState<OrdemProducao | null>(null);
   const [confirmRotulagem, setConfirmRotulagem] = useState<OrdemProducao | null>(null);
+  const [confirmCq, setConfirmCq] = useState<OrdemProducao | null>(null);
+  const [confirmManutencao, setConfirmManutencao] = useState<OrdemProducao | null>(null);
+  const [confirmTransfer, setConfirmTransfer] = useState<{ op: OrdemProducao; destinoId: string; destinoLabel: string } | null>(null);
+  const [rotulagemFeitaIds, setRotulagemFeitaIds] = useState<Set<string>>(new Set());
   const [pausaDialog, setPausaDialog] = useState<OrdemProducao | null>(null);
   const [rejeitoDialog, setRejeitoDialog] = useState<OrdemProducao | null>(null);
 
@@ -360,7 +364,13 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
       if (error) { toast.error("Erro a registar rotulagem"); return; }
     }
     toast.success("Rotulagem recebida — qualidade marcada como concluída");
+    setRotulagemFeitaIds((prev) => new Set([...prev, op.id]));
     logAction({ ...actor, acao: "rotulagem_recebida", alvoTabela: "rotulagem_inspecoes", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo } });
+  }
+
+  async function solicitarManutencao(op: OrdemProducao) {
+    logAction({ ...actor, acao: "manutencao_solicitada", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, zona: zona.id } });
+    toast.success("Manutenção solicitada — equipa de Manutenção notificada");
   }
 
   async function concluirEMoverEmbalamento(op: OrdemProducao) {
@@ -592,18 +602,23 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
                         onEnd={() => setConfirmConcluir(op)}
                         onView={() => setViewOP({ open: true, item: op })}
                         onRejeito={() => setRejeitoDialog(op)}
-                        onSolicitarCq={() => solicitarCq(op)}
+                        onSolicitarCq={() => setConfirmCq(op)}
+                        onSolicitarManutencao={() => setConfirmManutencao(op)}
                         hasTransfers={getTransfersFor(op).length > 0}
                         onTransfer={() => {
                           const destinos = getTransfersFor(op);
                           if (destinos.length === 1) {
-                            transferir(op, destinos[0].id, destinos[0].label);
+                            if (op.zona_id === "sl2_picking") {
+                              setConfirmTransfer({ op, destinoId: destinos[0].id, destinoLabel: destinos[0].label });
+                            } else {
+                              transferir(op, destinos[0].id, destinos[0].label);
+                            }
                           } else {
                             setTransferOP(op);
                           }
                         }}
                         onRotulagemRecebida={eManualOuTermo ? () => setConfirmRotulagem(op) : undefined}
-                        onConcluirAutoEmbalamento={eManualOuTermo ? () => setConfirmAutoEmbalamento(op) : undefined}
+                        rotulagemJaFeita={rotulagemFeitaIds.has(op.id)}
                         onAvancarFase={eSL1 ? () => avancarFase(op) : undefined}
                       />
                     );
@@ -716,6 +731,36 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
           onConfirm={() => { registarRotulagemRecebida(confirmRotulagem); setConfirmRotulagem(null); }}
         />
       )}
+      {confirmCq && (
+        <ConfirmDialog
+          title="Solicitar inspeção de Qualidade?"
+          message="A equipa de CQ será notificada para inspecionar esta OP."
+          variant="default"
+          confirmLabel="🔍 Solicitar CQ"
+          onCancel={() => setConfirmCq(null)}
+          onConfirm={() => { solicitarCq(confirmCq); setConfirmCq(null); }}
+        />
+      )}
+      {confirmManutencao && (
+        <ConfirmDialog
+          title="Solicitar Manutenção?"
+          message="A equipa de Manutenção será notificada para intervir nesta zona."
+          variant="warning"
+          confirmLabel="🔧 Solicitar Manutenção"
+          onCancel={() => setConfirmManutencao(null)}
+          onConfirm={() => { solicitarManutencao(confirmManutencao); setConfirmManutencao(null); }}
+        />
+      )}
+      {confirmTransfer && (
+        <ConfirmDialog
+          title={`Transferir para ${confirmTransfer.destinoLabel}?`}
+          message={`A OP será movida de Picking para ${confirmTransfer.destinoLabel}. Confirma a transferência?`}
+          variant="default"
+          confirmLabel="→ Transferir"
+          onCancel={() => setConfirmTransfer(null)}
+          onConfirm={() => { transferir(confirmTransfer.op, confirmTransfer.destinoId, confirmTransfer.destinoLabel); setConfirmTransfer(null); }}
+        />
+      )}
       {pausaDialog && (
         <PausaDialog
           equipa={equipa}
@@ -746,16 +791,17 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
    OP ATUAL
    ========================================================== */
 function OPAtual({
-  op, compact = false, showSubBadge, onSetQty, onPause, onResume, onEnd, onView, onRejeito, onSolicitarCq, hasTransfers, onTransfer, onRotulagemRecebida, onConcluirAutoEmbalamento, onAvancarFase,
+  op, compact = false, showSubBadge, onSetQty, onPause, onResume, onEnd, onView, onRejeito, onSolicitarCq, onSolicitarManutencao, hasTransfers, onTransfer, onRotulagemRecebida, rotulagemJaFeita, onAvancarFase,
 }: {
   op: OrdemProducao; compact?: boolean; showSubBadge: boolean;
   onSetQty: (n: number) => void;
   onPause: () => void; onResume: () => void; onEnd: () => void; onView: () => void;
   onRejeito: () => void;
   onSolicitarCq: () => void;
+  onSolicitarManutencao: () => void;
   hasTransfers: boolean; onTransfer: () => void;
   onRotulagemRecebida?: () => void;
-  onConcluirAutoEmbalamento?: () => void;
+  rotulagemJaFeita?: boolean;
   onAvancarFase?: () => void;
 }) {
   const pct = op.quantidade_alvo > 0 ? Math.min(100, (op.quantidade_atual / op.quantidade_alvo) * 100) : 0;
@@ -991,50 +1037,54 @@ function OPAtual({
                 </button>
               )}
               {!ePicking && (
-                eManualOuTermo && onConcluirAutoEmbalamento ? (
-                  <button onClick={onConcluirAutoEmbalamento} className="col-span-2 rounded-2xl bg-blue-600 py-4 text-lg font-extrabold text-white shadow-md transition-all hover:bg-blue-700 active:scale-95">
-                    ✓ Concluído
-                  </button>
-                ) : (
-                  <button onClick={onEnd} className="col-span-2 rounded-2xl bg-blue-600 py-4 text-lg font-extrabold text-white shadow-md transition-all hover:bg-blue-700 active:scale-95">
-                    ✓ Concluir OP
-                  </button>
-                )
+                <button onClick={onEnd} className="col-span-2 rounded-2xl bg-blue-600 py-4 text-lg font-extrabold text-white shadow-md transition-all hover:bg-blue-700 active:scale-95">
+                  {eManualOuTermo ? "✓ Concluído" : "✓ Concluir OP"}
+                </button>
               )}
             </div>
 
-            {/* Botões secundários */}
-            {!ePicking && !eEmbalamento && (
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {!eManualOuTermo && (
-                  <button
-                    onClick={onRejeito}
-                    className="rounded-2xl border-2 border-red-200 bg-red-50 py-3 text-sm font-extrabold text-red-700 transition-all hover:bg-red-100 active:scale-95"
-                  >
-                    ❌ Registar Rejeitados
-                  </button>
-                )}
+            {/* Botões secundários: Rejeitados + CQ + Manutenção */}
+            <div className="mt-2 flex flex-col gap-2">
+              {!eManualOuTermo && !eEmbalamento && !ePicking && (
+                <button
+                  onClick={onRejeito}
+                  className="rounded-2xl border-2 border-red-200 bg-red-50 py-2.5 text-sm font-extrabold text-red-700 transition-all hover:bg-red-100 active:scale-95"
+                >
+                  ❌ Registar Rejeitados
+                </button>
+              )}
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={onSolicitarCq}
-                  className={cn(
-                    "rounded-2xl border-2 border-sky-300 bg-sky-50 py-3 text-sm font-extrabold text-sky-700 transition-all hover:bg-sky-100 active:scale-95",
-                    eManualOuTermo && "col-span-2"
-                  )}
+                  className="rounded-2xl border-2 border-sky-300 bg-sky-50 py-2.5 text-sm font-extrabold text-sky-700 transition-all hover:bg-sky-100 active:scale-95"
                   title="Chamar a equipa de Qualidade para inspeção da OP"
                 >
                   🔍 Solicitar CQ
                 </button>
+                <button
+                  onClick={onSolicitarManutencao}
+                  className="rounded-2xl border-2 border-orange-300 bg-orange-50 py-2.5 text-sm font-extrabold text-orange-700 transition-all hover:bg-orange-100 active:scale-95"
+                  title="Chamar a equipa de Manutenção"
+                >
+                  🔧 Manutenção
+                </button>
               </div>
-            )}
+            </div>
 
             {/* Linha manual: rotulagem recebida */}
             {eManualOuTermo && onRotulagemRecebida && (
               <div className="mt-2">
                 <button
-                  onClick={onRotulagemRecebida}
-                  className="w-full rounded-2xl border-2 border-teal-300 bg-teal-50 py-3 text-sm font-extrabold text-teal-700 transition-all hover:bg-teal-100 active:scale-95"
+                  onClick={rotulagemJaFeita ? undefined : onRotulagemRecebida}
+                  disabled={rotulagemJaFeita}
+                  className={cn(
+                    "w-full rounded-2xl border-2 py-3 text-sm font-extrabold transition-all",
+                    rotulagemJaFeita
+                      ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 opacity-60"
+                      : "border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100 active:scale-95"
+                  )}
                 >
-                  🏷 Rotulagem Recebida
+                  {rotulagemJaFeita ? "✓ Rotulagem Recebida" : "🏷 Rotulagem Recebida"}
                 </button>
               </div>
             )}
