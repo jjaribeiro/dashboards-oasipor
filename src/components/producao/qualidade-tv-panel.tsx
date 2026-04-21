@@ -303,7 +303,7 @@ function KpiCard({ label, value, sub, color }: { label: string; value: string; s
   );
 }
 
-const ROTULAGEM_PER_PAGE = 5;
+const ROTULAGEM_PER_PAGE = 4;
 const ROTULAGEM_ROTATION_SECONDS = 15;
 
 function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorDia: PedidoProducao[][] }) {
@@ -356,15 +356,15 @@ function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorD
           }
           const p = r.pedido;
           return (
-            <li key={`p-${p.id}-${idx}`} className="flex min-h-0 flex-1 flex-col justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+            <li key={`p-${p.id}-${idx}`} className="flex flex-none flex-col gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
               <div className="flex items-center gap-1.5">
                 <span className={cn("rounded border px-1.5 py-0.5 text-[11px] font-extrabold shrink-0", PRIORIDADE_OP_COR[p.prioridade])}>{PRIORIDADE_OP_LABEL[p.prioridade]}</span>
                 <span className="font-mono text-[11px] font-bold text-slate-500 shrink-0">{p.numero ?? "—"}</span>
                 {p.precisa_rotulagem && <span className="rounded bg-lime-100 px-1.5 py-0.5 text-[11px] font-extrabold text-lime-700 shrink-0">🏷 rotul.</span>}
                 <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-extrabold text-slate-700 shrink-0">{p.quantidade_alvo}un</span>
               </div>
-              <span className="truncate text-lg font-black text-slate-900 leading-tight">{p.produto_nome}</span>
-              <span className="truncate text-sm font-bold text-slate-500">{p.cliente ?? "—"}</span>
+              <span className="truncate text-base font-black text-slate-900 leading-tight">{p.produto_nome}</span>
+              <span className="truncate text-xs font-bold text-slate-500">{p.cliente ?? "—"}</span>
             </li>
           );
         })}
@@ -412,30 +412,30 @@ function RotulagemCarousel({ ops, pedidoPorId }: { ops: OrdemProducao[]; pedidoP
         </div>
       )}
 
-      <ul className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-2">
+      <ul className="grid min-h-0 flex-1 grid-rows-4 gap-2 overflow-hidden p-2">
         {pageOps.map((op) => {
           const ped = op.pedido_id ? pedidoPorId.get(op.pedido_id) : null;
           return (
-            <li key={op.id} className="flex min-h-0 flex-1 flex-col justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
-              <div className="flex w-full items-center gap-1.5">
-                <span className={cn("rounded border px-1.5 py-0.5 text-[11px] font-extrabold shrink-0", ESTADO_OP_COR[op.estado] ?? "bg-slate-100 text-slate-700 border-slate-200")}>
+            <li key={op.id} className="flex min-h-0 flex-col justify-center gap-1.5 overflow-hidden rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <div className="flex w-full items-center gap-2">
+                <span className={cn("rounded border px-2 py-0.5 text-sm font-extrabold shrink-0", ESTADO_OP_COR[op.estado] ?? "bg-slate-100 text-slate-700 border-slate-200")}>
                   {ESTADO_OP_LABEL[op.estado] ?? op.estado}
                 </span>
                 {op.lote ? (
-                  <span className="rounded bg-lime-100 px-1.5 py-0.5 font-mono text-[11px] font-extrabold text-lime-700 shrink-0" title="Lote">LT {op.lote}</span>
+                  <span className="rounded bg-lime-100 px-2 py-0.5 font-mono text-sm font-extrabold text-lime-700 shrink-0" title="Lote">LT {op.lote}</span>
                 ) : (
-                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-extrabold text-amber-700 shrink-0">sem lote</span>
+                  <span className="rounded bg-amber-100 px-2 py-0.5 text-sm font-extrabold text-amber-700 shrink-0">sem lote</span>
                 )}
-                <span className="truncate text-sm font-black text-slate-900">{op.produto_nome}</span>
-                <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-extrabold text-slate-700 shrink-0">{op.quantidade_atual}/{op.quantidade_alvo}</span>
+                <span className="truncate text-lg font-black text-slate-900">{op.produto_nome}</span>
+                <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-sm font-extrabold text-slate-700 shrink-0">{op.quantidade_atual}/{op.quantidade_alvo}</span>
               </div>
-              <div className="flex w-full items-center gap-1.5 text-[11px] font-bold">
-                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {op.produto_codigo ?? "—"}</span>
-                {ped?.ficha_producao && <span className="rounded bg-indigo-100 px-1.5 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {ped.ficha_producao}</span>}
-                {ped?.numero && <span className="rounded bg-sky-100 px-1.5 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {ped.numero}</span>}
-                {op.numero && <span className="rounded bg-violet-100 px-1.5 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {op.numero}</span>}
+              <div className="flex w-full items-center gap-2 text-sm font-bold">
+                <span className="rounded bg-slate-100 px-2 py-0.5 font-mono font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {op.produto_codigo ?? "—"}</span>
+                {ped?.ficha_producao && <span className="rounded bg-indigo-100 px-2 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {ped.ficha_producao}</span>}
+                {ped?.numero && <span className="rounded bg-sky-100 px-2 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {ped.numero}</span>}
+                {op.numero && <span className="rounded bg-violet-100 px-2 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {op.numero}</span>}
               </div>
-              <span className="truncate text-[11px] font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"} · {ZONA_LABEL[op.zona_id] ?? op.zona_id}</span>
+              <span className="truncate text-sm font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"} · {ZONA_LABEL[op.zona_id] ?? op.zona_id}</span>
             </li>
           );
         })}
