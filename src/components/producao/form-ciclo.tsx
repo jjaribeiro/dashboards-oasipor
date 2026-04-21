@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { supabase } from "@/lib/supabase/client";
 import { DURACAO_DEFAULT_MIN, ZONA_LABEL } from "@/lib/constants";
 import { toast } from "sonner";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { cn } from "@/lib/utils";
 import type { EquipamentoCiclo, OrdemProducao } from "@/lib/types";
 
@@ -132,6 +133,7 @@ export function FormCiclo({ open, onOpenChange, editItem, zonaId }: FormCicloPro
       const { error } = await supabase.from("equipamento_ciclo").update(data).eq("id", editItem.id);
       setLoading(false);
       if (error) { toast.error("Erro ao guardar"); return; }
+      notifyMutation("equipamento_ciclo");
       toast.success("Ciclo atualizado");
       onOpenChange(false);
     } else {
@@ -180,6 +182,7 @@ export function FormCiclo({ open, onOpenChange, editItem, zonaId }: FormCicloPro
       }
 
       setLoading(false);
+      notifyMutation("equipamento_ciclo");
       toast.success(`Ciclo iniciado em ${ZONA_LABEL[preCond]}`);
       onOpenChange(false);
     }
@@ -190,7 +193,7 @@ export function FormCiclo({ open, onOpenChange, editItem, zonaId }: FormCicloPro
     if (!confirm("Tem a certeza que quer apagar este ciclo?")) return;
     const { error } = await supabase.from("equipamento_ciclo").delete().eq("id", editItem.id);
     if (error) toast.error("Erro ao apagar ciclo");
-    else { toast.success("Ciclo apagado"); onOpenChange(false); }
+    else { notifyMutation("equipamento_ciclo"); toast.success("Ciclo apagado"); onOpenChange(false); }
   }
 
   const isNew = !editItem;

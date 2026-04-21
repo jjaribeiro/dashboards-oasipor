@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { cn, formatShortDateTime, computePrioridadeEfetiva } from "@/lib/utils";
 import { ZONA_LABEL, ESTADO_PEDIDO_LABEL, ESTADO_PEDIDO_COR, ESTADO_OP_LABEL, ESTADO_OP_COR, PRIORIDADE_OP_COR, PRIORIDADE_OP_LABEL } from "@/lib/constants";
 import type { PedidoProducao, OrdemProducao, ZonaProducao, ZonaId, PrioridadeOP } from "@/lib/types";
@@ -67,6 +68,7 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
       const { error } = await supabase.from("pedidos_producao").update(update).eq("id", p.id);
       if (!error) count++;
     }
+    notifyMutation("pedidos_producao");
     toast.success(`${count} pedido${count === 1 ? "" : "s"} agendado${count === 1 ? "" : "s"} para ${new Date(bulkDate).toLocaleDateString("pt-PT")}`);
   }
   async function limparBulk() {
@@ -80,6 +82,7 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
       const { error } = await supabase.from("pedidos_producao").update(update).eq("id", p.id);
       if (!error) count++;
     }
+    notifyMutation("pedidos_producao");
     toast.success(`${count} pedido${count === 1 ? "" : "s"} desagendado${count === 1 ? "" : "s"}`);
   }
 
@@ -190,7 +193,7 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
             await supabase.from("ordens_producao").delete().in("pedido_id", ids);
             const { error } = await supabase.from("pedidos_producao").delete().in("id", ids);
             if (error) toast.error("Erro a apagar: " + error.message);
-            else toast.success(`${ids.length} pedidos apagados`);
+            else { notifyMutation("pedidos_producao"); notifyMutation("ordens_producao"); toast.success(`${ids.length} pedidos apagados`); }
           }}
           className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-extrabold text-red-700 shadow-sm hover:bg-red-100"
           title="Apagar todos os pedidos"
@@ -595,6 +598,7 @@ function ProgramarTodosDialog({ pedidos, opsPorPedido, onClose }: {
       toast.error(`${errors.length} erro(s). Primeiro: ${errors[0]}`);
     }
     if (atualizados > 0) {
+      notifyMutation("pedidos_producao");
       toast.success(`${atualizados} pedido${atualizados === 1 ? "" : "s"} actualizado${atualizados === 1 ? "" : "s"}`);
     } else if (errors.length === 0) {
       toast.info?.("Sem alterações");
@@ -894,6 +898,8 @@ function ProgramarPedidoDialog({ pedido, zonas, opsExistentes, onClose }: {
       toast.error("Erro a criar OPs: " + error.message);
       return;
     }
+    notifyMutation("ordens_producao");
+    notifyMutation("pedidos_producao");
     toast.success(`${validas.length} OP${validas.length > 1 ? "s" : ""} criada${validas.length > 1 ? "s" : ""} para o pedido`);
     onClose();
   }
@@ -1094,11 +1100,11 @@ export function FormPedido({ open, onClose, editItem, readOnly = false, comercia
     if (editItem) {
       const { error } = await supabase.from("pedidos_producao").update(payload).eq("id", editItem.id);
       if (error) toast.error("Erro a guardar: " + error.message);
-      else toast.success("Pedido actualizado");
+      else { notifyMutation("pedidos_producao"); toast.success("Pedido actualizado"); }
     } else {
       const { error } = await supabase.from("pedidos_producao").insert(payload);
       if (error) toast.error("Erro a criar: " + error.message);
-      else toast.success("Pedido criado");
+      else { notifyMutation("pedidos_producao"); toast.success("Pedido criado"); }
     }
     setSaving(false);
     if (!editItem || (editItem)) onClose();
@@ -1116,6 +1122,7 @@ export function FormPedido({ open, onClose, editItem, readOnly = false, comercia
     const { error } = await supabase.from("pedidos_producao").update(update).eq("id", editItem.id);
     setSaving(false);
     if (error) { toast.error("Erro: " + error.message); return; }
+    notifyMutation("pedidos_producao");
     toast.success("Agendamento actualizado");
     onClose();
   }
@@ -1125,7 +1132,7 @@ export function FormPedido({ open, onClose, editItem, readOnly = false, comercia
     if (!confirm(`Apagar pedido "${editItem.produto_nome}"? As OPs ligadas ficarão sem pedido.`)) return;
     const { error } = await supabase.from("pedidos_producao").delete().eq("id", editItem.id);
     if (error) toast.error("Erro a apagar: " + error.message);
-    else { toast.success("Pedido apagado"); onClose(); }
+    else { notifyMutation("pedidos_producao"); toast.success("Pedido apagado"); onClose(); }
   }
 
   return (
