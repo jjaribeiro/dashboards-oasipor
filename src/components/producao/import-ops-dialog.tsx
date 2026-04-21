@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 
 interface ImportPedidosDialogProps {
   onClose: () => void;
@@ -365,6 +366,7 @@ export function ImportOpsDialog({ onClose, onImported }: ImportPedidosDialogProp
       }));
       const { error } = await supabase.from("pedidos_producao").insert(payload);
       if (error) insertError = error.message;
+      else notifyMutation("pedidos_producao");
     }
 
     // Atualizar stock/reservas/consumos dos existentes
@@ -381,30 +383,41 @@ export function ImportOpsDialog({ onClose, onImported }: ImportPedidosDialogProp
       }).eq("id", u.id);
       if (error) { updateError = error.message; continue; }
       atualizados++;
+      notifyMutation("pedidos_producao");
     }
 
     // Guardar produtos na memória de produtos (upsert por referencia)
-    const produtosParaSalvar = validos
-      .filter((p) => p.produto_codigo)
-      .map((p) => ({
-        referencia: p.produto_codigo!,
+    // Dedup por referencia (um Excel pode trazer várias linhas com a mesma ref)
+    const produtosMap = new Map<string, { referencia: string; nome: string; descricao: string; categoria: string; qtd_por_caixa: number | null }>();
+    for (const p of validos) {
+      if (!p.produto_codigo) continue;
+      // Fallback: categoria NOT NULL na BD — se não foi inferida usamos "outros"
+      const categoriaDb = p.categoria ?? "outros";
+      produtosMap.set(p.produto_codigo, {
+        referencia: p.produto_codigo,
+        nome: p.produto_nome,
         descricao: p.produto_nome,
-        tipo: null as string | null,
-        tipo_caixa: null as string | null,
+        categoria: categoriaDb,
         qtd_por_caixa: p.quantidade_por_caixa,
-      }));
+      });
+    }
+    const produtosParaSalvar = Array.from(produtosMap.values());
+    let produtosError: string | null = null;
     if (produtosParaSalvar.length > 0) {
-      // Upsert: actualiza descricao e qtd_por_caixa se referencia já existe; não sobrescreve tipo/tipo_caixa
-      await supabase.from("produtos").upsert(
+      // Upsert: actualiza descricao/qtd_por_caixa/categoria se referencia já existe; não sobrescreve tipo/tipo_caixa (mantidos pelo user)
+      const { error } = await supabase.from("produtos").upsert(
         produtosParaSalvar,
         { onConflict: "referencia", ignoreDuplicates: false }
       );
+      if (error) produtosError = error.message;
+      else notifyMutation("produtos");
     }
 
     setImporting(false);
 
     if (insertError) { toast.error(`Erro a importar novos: ${insertError}`); return; }
     if (updateError) { toast.error(`Erro a atualizar: ${updateError}`); }
+    if (produtosError) { toast.error(`Erro a gravar produtos: ${produtosError}`); }
 
     const partes: string[] = [];
     if (novos.length > 0) partes.push(`${novos.length} novo${novos.length > 1 ? "s" : ""}`);

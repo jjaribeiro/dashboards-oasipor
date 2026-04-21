@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useRealtime } from "@/hooks/use-realtime";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { COLUMN_CONFIG } from "@/lib/constants";
 import { getUrgencyLevel } from "@/lib/utils";
 import { Column } from "./column";
@@ -138,6 +139,7 @@ export function DashboardGrid({
             return next;
           });
         } else {
+          notifyMutation(table);
           toast.success("Item concluído");
         }
       }, 500);

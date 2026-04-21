@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/lib/supabase/client";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { RESPONSAVEIS } from "@/lib/constants";
 import { toast } from "sonner";
 import type { Tarefa } from "@/lib/types";
@@ -51,6 +52,7 @@ export function FormTarefa({ open, onOpenChange, editItem }: FormTarefaProps) {
       toast.error("Erro ao guardar tarefa");
       return;
     }
+    notifyMutation("tarefas");
     toast.success(editItem ? "Tarefa atualizada" : "Tarefa adicionada");
     onOpenChange(false);
   }

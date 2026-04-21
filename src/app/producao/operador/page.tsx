@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { AREA_LABEL } from "@/lib/constants";
 import { ClockDisplay } from "@/components/clock-display";
-import { DashboardAuthGate } from "@/components/dashboard-auth-gate";
+import { FuncionarioAuthGate } from "@/components/funcionario-auth-gate";
 import type { Funcionario, OrdemProducao } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -87,7 +87,7 @@ export default async function OperadorSelector() {
   });
 
   return (
-    <DashboardAuthGate dashboardKey="operador" title="Produção — Operadores" subtitle="Introduz o teu PIN para entrar">
+    <FuncionarioAuthGate requiredAccess="operador" title="Operadores" subtitle="Introduz o teu PIN para entrar">
     <main className="flex h-full flex-col bg-slate-50">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 shadow-sm">
         <div className="flex items-center gap-4">
@@ -205,6 +205,6 @@ export default async function OperadorSelector() {
         })}
       </div>
     </main>
-    </DashboardAuthGate>
+    </FuncionarioAuthGate>
   );
 }

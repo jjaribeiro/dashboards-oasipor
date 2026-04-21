@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { cn } from "@/lib/utils";
 import type { EstadoPresenca, Funcionario, FuncionarioPresenca, TipoPresenca } from "@/lib/types";
 
@@ -201,6 +202,7 @@ function PresencaPinDialog({
     });
     setSaving(false);
     if (error) { toast.error(`Erro: ${error.message}`); return; }
+    notifyMutation("funcionario_presencas");
     const labels: Record<TipoPresenca, string> = {
       entrada: "Entrada registada",
       pausa_inicio: "Pausa iniciada",

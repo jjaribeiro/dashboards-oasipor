@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useRealtimeTable, notifyMutation } from "@/hooks/use-realtime-table";
 import { usePessoaSession, logAction } from "@/hooks/use-pessoa-session";
 import { ClockDisplay } from "@/components/clock-display";
 import { cn } from "@/lib/utils";
@@ -181,7 +181,7 @@ export function QualidadeTvPanel({ ops: initialOps, pedidos: initialPedidos, ini
       </header>
 
       {/* KPIs */}
-      <div className="grid grid-cols-5 gap-3 border-b border-slate-200 bg-white px-6 py-3">
+      <div className="grid grid-cols-5 gap-3 border-b border-slate-200 bg-white px-6 py-4">
         <KpiCard label="Pedidos na semana" value={String(semanaTotal)} color="slate" />
         <KpiCard label="Rotulagem pendente" value={String(rotulagemPendente.length)} color={rotulagemPendente.length > 0 ? "amber" : "emerald"} />
         <KpiCard label="CQ/Manutenção solicitado" value={String(cqSolicitado.length + manutencaoPedidos.length)} color={(cqSolicitado.length + manutencaoPedidos.length) > 0 ? "sky" : "emerald"} />
@@ -209,34 +209,57 @@ export function QualidadeTvPanel({ ops: initialOps, pedidos: initialPedidos, ini
               <p className="py-12 text-center text-sm font-bold text-slate-400">Sem pedidos pendentes 🎉</p>
             ) : (
               <ul className="space-y-2">
-                {cqSolicitado.map(({ inspecao, op }) => (
+                {cqSolicitado.map(({ inspecao, op }) => {
+                  const ped = op.pedido_id ? pedidoPorId.get(op.pedido_id) : null;
+                  return (
                   <li key={inspecao.id}>
                     <button onClick={() => setCqInspecao({ op, pendente: inspecao })} className="flex w-full flex-col items-start gap-1 rounded-lg border border-sky-200 bg-sky-50 p-3 text-left shadow-sm hover:border-sky-400 hover:bg-sky-100">
                       <div className="flex w-full items-center gap-1.5">
-                        <span className="rounded bg-sky-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">CQ SOLICITADO</span>
-                        <span className="font-mono text-[10px] font-bold text-slate-600">{op.numero ?? "—"}</span>
-                        <span className="ml-auto text-[10px] font-bold text-slate-500" suppressHydrationWarning>{new Date(inspecao.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
+                        <span className="rounded bg-sky-600 px-1.5 py-0.5 text-xs font-extrabold text-white shrink-0">CQ SOLICITADO</span>
+                        {op.lote ? (
+                          <span className="rounded bg-lime-100 px-1.5 py-0.5 font-mono text-xs font-extrabold text-lime-700 shrink-0" title="Lote">LT {op.lote}</span>
+                        ) : (
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-extrabold text-amber-700 shrink-0">sem lote</span>
+                        )}
+                        <span className="ml-auto text-xs font-bold text-slate-500 shrink-0" suppressHydrationWarning>{new Date(inspecao.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
                       </div>
-                      <span className="text-sm font-black text-slate-900">{op.produto_nome}</span>
-                      <span className="text-xs font-bold text-slate-500">{ZONA_LABEL[op.zona_id] ?? op.zona_id} · {inspecao.pessoa_nome ?? "—"}</span>
-                      {op.lote && <span className="text-[10px] font-bold text-slate-400">Lote: {op.lote}</span>}
+                      <span className="truncate text-base font-black text-slate-900 leading-tight">{op.produto_nome}</span>
+                      <div className="flex w-full flex-wrap items-center gap-1.5 text-xs font-bold">
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono font-extrabold text-slate-700" title="Referência do produto">REF {op.produto_codigo ?? "—"}</span>
+                        {ped?.ficha_producao && <span className="rounded bg-indigo-100 px-1.5 py-0.5 font-mono font-extrabold text-indigo-700" title="Ficha de Produção">FP {ped.ficha_producao}</span>}
+                        {ped?.numero && <span className="rounded bg-sky-100 px-1.5 py-0.5 font-mono font-extrabold text-sky-700" title="Pedido de Produção">PP {ped.numero}</span>}
+                        {op.numero && <span className="rounded bg-violet-100 px-1.5 py-0.5 font-mono font-extrabold text-violet-700" title="Ordem de Produção">OP {op.numero}</span>}
+                      </div>
+                      <span className="truncate text-xs font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"} · {ZONA_LABEL[op.zona_id] ?? op.zona_id} · {inspecao.pessoa_nome ?? "—"}</span>
                     </button>
                   </li>
-                ))}
-                {manutencaoPedidos.map((log) => (
+                  );
+                })}
+                {manutencaoPedidos.map((log) => {
+                  const det = (log.detalhes as Record<string, string> | null) ?? null;
+                  return (
                   <li key={log.id}>
                     <div className="flex flex-col gap-1 rounded-lg border border-orange-200 bg-orange-50 p-3 shadow-sm">
                       <div className="flex w-full items-center gap-1.5">
-                        <span className="rounded bg-orange-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">🔧 MANUTENÇÃO</span>
-                        <span className="ml-auto text-[10px] font-bold text-slate-500" suppressHydrationWarning>{new Date(log.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
+                        <span className="rounded bg-orange-600 px-1.5 py-0.5 text-xs font-extrabold text-white shrink-0">🔧 MANUTENÇÃO</span>
+                        {det?.lote && <span className="rounded bg-lime-100 px-1.5 py-0.5 font-mono text-xs font-extrabold text-lime-700 shrink-0" title="Lote">LT {det.lote}</span>}
+                        <span className="ml-auto text-xs font-bold text-slate-500 shrink-0" suppressHydrationWarning>{new Date(log.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
                       </div>
-                      <span className="text-sm font-black text-slate-900">{(log.detalhes as Record<string, string> | null)?.produto ?? "—"}</span>
-                      <span className="text-xs font-bold text-slate-500">
+                      <span className="truncate text-base font-black text-slate-900 leading-tight">{det?.produto ?? "—"}</span>
+                      {(det?.produto_codigo || det?.op_numero || det?.pp_numero) && (
+                        <div className="flex w-full flex-wrap items-center gap-1.5 text-xs font-bold">
+                          {det?.produto_codigo && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono font-extrabold text-slate-700" title="Referência do produto">REF {det.produto_codigo}</span>}
+                          {det?.pp_numero && <span className="rounded bg-sky-100 px-1.5 py-0.5 font-mono font-extrabold text-sky-700" title="Pedido de Produção">PP {det.pp_numero}</span>}
+                          {det?.op_numero && <span className="rounded bg-violet-100 px-1.5 py-0.5 font-mono font-extrabold text-violet-700" title="Ordem de Produção">OP {det.op_numero}</span>}
+                        </div>
+                      )}
+                      <span className="truncate text-xs font-bold text-slate-500">
                         {log.zona_id ? (ZONA_LABEL[log.zona_id as keyof typeof ZONA_LABEL] ?? log.zona_id) : "—"} · {log.pessoa_nome ?? "—"}
                       </span>
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -254,9 +277,9 @@ function Section({ title, badge, accent = "slate", children }: { title: string; 
   const borderCls = accent === "lime" ? "border-lime-200" : accent === "sky" ? "border-sky-200" : "border-slate-200";
   return (
     <div className={cn("flex min-h-0 flex-col overflow-hidden rounded-xl border-2 bg-white", borderCls)}>
-      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
-        <h2 className="text-sm font-black text-slate-900">{title}</h2>
-        {badge && <span className="rounded bg-white px-2 py-0.5 text-[10px] font-extrabold text-slate-700">{badge}</span>}
+      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+        <h2 className="text-lg font-black text-slate-900">{title}</h2>
+        {badge && <span className="rounded bg-white px-2.5 py-1 text-xs font-extrabold text-slate-700">{badge}</span>}
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">{children}</div>
     </div>
@@ -272,10 +295,10 @@ function KpiCard({ label, value, sub, color }: { label: string; value: string; s
     red: "border-red-200 bg-red-50 text-red-700",
   }[color];
   return (
-    <div className={cn("rounded-xl border-2 p-3", cls)}>
-      <p className="text-[10px] font-extrabold uppercase tracking-wide">{label}</p>
-      <p className="mt-0.5 text-2xl font-black">{value}</p>
-      {sub && <p className="text-[10px] font-bold opacity-80">{sub}</p>}
+    <div className={cn("rounded-xl border-2 p-4", cls)}>
+      <p className="text-sm font-extrabold uppercase tracking-wide">{label}</p>
+      <p className="mt-1 text-4xl font-black">{value}</p>
+      {sub && <p className="mt-0.5 text-xs font-bold opacity-80">{sub}</p>}
     </div>
   );
 }
@@ -325,23 +348,23 @@ function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorD
           if (r.tipo === "dia") {
             const hoje = isSameDay(r.dia, new Date());
             return (
-              <li key={`dia-${r.idx}-${idx}`} className={cn("flex min-h-0 items-center justify-between rounded-lg border-2 px-3 py-1.5 shadow-sm", hoje ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-slate-100")}>
-                <span className={cn("text-xs font-black", hoje ? "text-emerald-800" : "text-slate-700")}>{DIAS_LABEL[r.idx]} {fmtDate(r.dia)}{hoje && " · hoje"}</span>
-                <span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-slate-600">{r.count} pedido{r.count === 1 ? "" : "s"}</span>
+              <li key={`dia-${r.idx}-${idx}`} className={cn("flex min-h-0 items-center justify-between rounded-lg border-2 px-3 py-1 shadow-sm", hoje ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-slate-100")}>
+                <span className={cn("text-2xl font-black uppercase tracking-wide", hoje ? "text-emerald-800" : "text-slate-800")}>{DIAS_LABEL[r.idx]} <span className="text-base font-extrabold opacity-80">{fmtDate(r.dia)}{hoje && " · hoje"}</span></span>
+                <span className="rounded bg-white px-2 py-0.5 text-xs font-extrabold text-slate-600">{r.count} pedido{r.count === 1 ? "" : "s"}</span>
               </li>
             );
           }
           const p = r.pedido;
           return (
-            <li key={`p-${p.id}-${idx}`} className="flex min-h-0 flex-col justify-center gap-0.5 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+            <li key={`p-${p.id}-${idx}`} className="flex min-h-0 flex-col justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
               <div className="flex items-center gap-1.5">
-                <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-extrabold", PRIORIDADE_OP_COR[p.prioridade])}>{PRIORIDADE_OP_LABEL[p.prioridade]}</span>
-                <span className="font-mono text-[10px] font-bold text-slate-500">{p.numero ?? "—"}</span>
-                {p.precisa_rotulagem && <span className="rounded bg-lime-100 px-1.5 py-0.5 text-[10px] font-extrabold text-lime-700">🏷 rotul.</span>}
-                <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-extrabold text-slate-700">{p.quantidade_alvo}un</span>
+                <span className={cn("rounded border px-1.5 py-0.5 text-xs font-extrabold", PRIORIDADE_OP_COR[p.prioridade])}>{PRIORIDADE_OP_LABEL[p.prioridade]}</span>
+                <span className="font-mono text-xs font-bold text-slate-500">{p.numero ?? "—"}</span>
+                {p.precisa_rotulagem && <span className="rounded bg-lime-100 px-1.5 py-0.5 text-xs font-extrabold text-lime-700">🏷 rotul.</span>}
+                <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-xs font-extrabold text-slate-700">{p.quantidade_alvo}un</span>
               </div>
-              <span className="truncate text-sm font-black text-slate-900">{p.produto_nome}</span>
-              <span className="truncate text-xs font-bold text-slate-500">{p.cliente ?? "—"}</span>
+              <span className="truncate text-lg font-black text-slate-900 leading-tight">{p.produto_nome}</span>
+              <span className="truncate text-sm font-bold text-slate-500">{p.cliente ?? "—"}</span>
             </li>
           );
         })}
@@ -395,18 +418,23 @@ function RotulagemCarousel({ ops, pedidoPorId }: { ops: OrdemProducao[]; pedidoP
           return (
             <li key={op.id} className="flex min-h-0 flex-col justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
               <div className="flex w-full items-center gap-1.5">
-                <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-extrabold", ESTADO_OP_COR[op.estado] ?? "bg-slate-100 text-slate-700 border-slate-200")}>
+                <span className={cn("rounded border px-1.5 py-0.5 text-xs font-extrabold shrink-0", ESTADO_OP_COR[op.estado] ?? "bg-slate-100 text-slate-700 border-slate-200")}>
                   {ESTADO_OP_LABEL[op.estado] ?? op.estado}
                 </span>
                 {op.lote ? (
-                  <span className="rounded bg-lime-100 px-1.5 py-0.5 font-mono text-[10px] font-extrabold text-lime-700" title="Lote">LT {op.lote}</span>
+                  <span className="rounded bg-lime-100 px-1.5 py-0.5 font-mono text-xs font-extrabold text-lime-700 shrink-0" title="Lote">LT {op.lote}</span>
                 ) : (
-                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-700">sem lote</span>
+                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-extrabold text-amber-700 shrink-0">sem lote</span>
                 )}
-                <span className="font-mono text-[10px] font-bold text-slate-500">{op.produto_codigo ?? "—"}</span>
-                <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-extrabold text-slate-700">{op.quantidade_atual}/{op.quantidade_alvo}</span>
+                <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-xs font-extrabold text-slate-700 shrink-0">{op.quantidade_atual}/{op.quantidade_alvo}</span>
               </div>
-              <span className="truncate text-sm font-black text-slate-900">{op.produto_nome}</span>
+              <span className="truncate text-base font-black text-slate-900 leading-tight">{op.produto_nome}</span>
+              <div className="flex w-full items-center gap-1.5 text-xs font-bold">
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {op.produto_codigo ?? "—"}</span>
+                {ped?.ficha_producao && <span className="rounded bg-indigo-100 px-1.5 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {ped.ficha_producao}</span>}
+                {ped?.numero && <span className="rounded bg-sky-100 px-1.5 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {ped.numero}</span>}
+                {op.numero && <span className="rounded bg-violet-100 px-1.5 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {op.numero}</span>}
+              </div>
               <span className="truncate text-xs font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"} · {ZONA_LABEL[op.zona_id] ?? op.zona_id}</span>
             </li>
           );
@@ -421,12 +449,12 @@ function HistoricoRotulagem({ lista }: { lista: RotulagemInspecao[] }) {
   if (feitas.length === 0) return null;
   return (
     <div className="border-t border-slate-200 bg-slate-50 px-3 py-2">
-      <p className="mb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Últimas inspeções</p>
+      <p className="mb-1 text-xs font-extrabold uppercase tracking-wide text-slate-500">Últimas inspeções</p>
       <ul className="space-y-0.5">
         {feitas.map((i) => (
-          <li key={i.id} className="flex items-center justify-between text-[10px]">
+          <li key={i.id} className="flex items-center justify-between gap-2 text-xs">
             <span className="truncate font-bold text-slate-600">{i.lote ?? "—"} · {i.pessoa_nome ?? "—"}</span>
-            <span className={cn("rounded px-1.5 py-0.5 font-extrabold", corRotulagem(i.resultado))}>{labelRotulagem(i.resultado)}</span>
+            <span className={cn("shrink-0 rounded px-1.5 py-0.5 font-extrabold", corRotulagem(i.resultado))}>{labelRotulagem(i.resultado)}</span>
           </li>
         ))}
       </ul>
@@ -438,10 +466,10 @@ function NcsAbertas({ lista }: { lista: NaoConformidade[] }) {
   if (lista.length === 0) return null;
   return (
     <div className="border-t border-slate-200 bg-red-50/50 px-3 py-2">
-      <p className="mb-1 text-[10px] font-extrabold uppercase tracking-wide text-red-700">Não-conformidades abertas</p>
+      <p className="mb-1 text-xs font-extrabold uppercase tracking-wide text-red-700">Não-conformidades abertas</p>
       <ul className="space-y-0.5">
         {lista.slice(0, 4).map((n) => (
-          <li key={n.id} className="flex items-center justify-between gap-2 text-[10px]">
+          <li key={n.id} className="flex items-center justify-between gap-2 text-xs">
             <span className="truncate font-bold text-slate-700" title={n.descricao}>{n.numero ?? "NC"} · {n.descricao.slice(0, 40)}{n.descricao.length > 40 ? "…" : ""}</span>
             <span className={cn("shrink-0 rounded px-1.5 py-0.5 font-extrabold", corSeveridade(n.severidade))}>{n.severidade}</span>
           </li>
@@ -502,6 +530,7 @@ function FormRotulagem({ op, onClose, pessoa }: { op: OrdemProducao; onClose: ()
     });
     setSaving(false);
     if (error) { toast.error(error.message); return; }
+    notifyMutation("rotulagem_inspecoes");
     await logAction({ pessoaId: pessoa?.pessoaId ?? null, pessoaNome: pessoa?.pessoaNome ?? null, acao: "rotulagem_inspecao", alvoTabela: "rotulagem_inspecoes", alvoId: op.id, detalhes: { resultado, qtdRee, qtdDesc } });
     toast.success("Inspeção registada");
     onClose();
@@ -599,6 +628,7 @@ function FormCq({ op, pendente, onClose, pessoa }: { op: OrdemProducao; pendente
     }
     setSaving(false);
     if (error) { toast.error(error.message); return; }
+    notifyMutation("cq_inspecoes");
     await logAction({ pessoaId: pessoa?.pessoaId ?? null, pessoaNome: pessoa?.pessoaNome ?? null, acao: "cq_inspecao", alvoTabela: "cq_inspecoes", alvoId: op.id, detalhes: { resultado } });
     toast.success("Inspeção CQ registada");
     onClose();

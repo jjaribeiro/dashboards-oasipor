@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase/client";
-import type { Pessoa } from "@/lib/types";
+import type { Pessoa, Funcionario } from "@/lib/types";
 
 const STORAGE_KEY = "oasipor_pessoa_session";
 const ZONA_STORAGE_KEY = "oasipor_zona_session";
+const FUNC_STORAGE_KEY = "oasipor_funcionario_session";
 
 interface SessionData {
   pessoaId: string;
@@ -131,6 +132,79 @@ export function useZonaSession(zonaId: string) {
   }, [zonaId]);
 
   return { zonaSession, loaded, loginZona, logoutZona };
+}
+
+// ============ FUNCIONARIO SESSION (PIN gate para dashboards produção) ============
+
+export interface FuncionarioSessionData {
+  funcionarioId: string;
+  nome: string;
+  acessos: string[];
+  loggedAt: number;
+}
+
+export type FuncionarioLoginResult =
+  | { ok: true; funcionario: Funcionario }
+  | { ok: false; reason: "invalid_pin" | "no_access" };
+
+function loadFuncionarioSession(): FuncionarioSessionData | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(FUNC_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as FuncionarioSessionData;
+  } catch {
+    return null;
+  }
+}
+
+function saveFuncionarioSession(data: FuncionarioSessionData | null) {
+  if (typeof window === "undefined") return;
+  if (data) sessionStorage.setItem(FUNC_STORAGE_KEY, JSON.stringify(data));
+  else sessionStorage.removeItem(FUNC_STORAGE_KEY);
+}
+
+export function useFuncionarioSession() {
+  const [session, setSession] = useState<FuncionarioSessionData | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    setSession(loadFuncionarioSession());
+    setLoaded(true);
+  }, []);
+
+  const login = useCallback(async (pin: string, requiredAccess?: string): Promise<FuncionarioLoginResult> => {
+    const { data, error } = await supabase
+      .from("funcionarios")
+      .select("*")
+      .eq("pin", pin)
+      .eq("ativo", true)
+      .maybeSingle();
+    if (error || !data) return { ok: false, reason: "invalid_pin" };
+    const funcionario = data as Funcionario;
+    const acessos = funcionario.acessos ?? [];
+    if (requiredAccess && !acessos.includes(requiredAccess)) {
+      // Ainda assim gravamos a sessão para que a UI mostre a mensagem de "sem acesso"
+      // mas preferimos não gravar — o chamador decide. Aqui apenas devolvemos.
+      return { ok: false, reason: "no_access" };
+    }
+    const newSession: FuncionarioSessionData = {
+      funcionarioId: funcionario.id,
+      nome: funcionario.nome,
+      acessos,
+      loggedAt: Date.now(),
+    };
+    saveFuncionarioSession(newSession);
+    setSession(newSession);
+    return { ok: true, funcionario };
+  }, []);
+
+  const logout = useCallback(() => {
+    saveFuncionarioSession(null);
+    setSession(null);
+  }, []);
+
+  return { session, loaded, login, logout };
 }
 
 /**

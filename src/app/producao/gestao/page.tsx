@@ -1,6 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ProducaoGestaoGrid } from "@/components/producao/producao-gestao-grid";
-import { DashboardAuthGate } from "@/components/dashboard-auth-gate";
+import { FuncionarioAuthGate } from "@/components/funcionario-auth-gate";
 import type { EquipamentoCiclo, Funcionario, OrdemProducao, ZonaProducao } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export default async function ProducaoGestao() {
   ]);
 
   return (
-    <DashboardAuthGate dashboardKey="gestao" title="Produção — Gestão">
+    <FuncionarioAuthGate requiredAccess="gestao" title="Gestão">
       <main className="h-dvh overflow-hidden">
         <ProducaoGestaoGrid
           initialZonas={(zonas.data ?? []) as ZonaProducao[]}
@@ -25,6 +25,6 @@ export default async function ProducaoGestao() {
           initialFuncionarios={(funcionarios.data ?? []) as Funcionario[]}
         />
       </main>
-    </DashboardAuthGate>
+    </FuncionarioAuthGate>
   );
 }

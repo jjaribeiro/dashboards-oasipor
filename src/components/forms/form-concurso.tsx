@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/lib/supabase/client";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { RESPONSAVEIS } from "@/lib/constants";
 import { toast } from "sonner";
 import type { Concurso } from "@/lib/types";
@@ -52,6 +53,7 @@ export function FormConcurso({ open, onOpenChange, editItem }: FormConcursoProps
       toast.error("Erro ao guardar concurso");
       return;
     }
+    notifyMutation("concursos");
     toast.success(editItem ? "Concurso atualizado" : "Concurso adicionado");
     onOpenChange(false);
   }

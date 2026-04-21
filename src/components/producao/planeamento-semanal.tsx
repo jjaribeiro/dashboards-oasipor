@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { toast } from "sonner";
 import { cn, computePrioridadeEfetiva } from "@/lib/utils";
 import { FormPedido } from "./planeamento-pedidos";
@@ -230,6 +231,7 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
     else if (!novaData && p.estado === "programado") update.estado = "pendente";
     const { error } = await supabase.from("pedidos_producao").update(update).eq("id", p.id);
     if (error) toast.error("Erro: " + error.message);
+    else notifyMutation("pedidos_producao");
   }
 
   function onDragStart(id: string) { setDragId(id); }
@@ -292,6 +294,7 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
       const { error } = await supabase.from("pedidos_producao").update(update).eq("id", a.pedido.id);
       if (!error) count++;
     }
+    if (count > 0) notifyMutation("pedidos_producao");
     toast.success(`${count} pedidos agendados automaticamente`);
   }
 
@@ -326,6 +329,7 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
       const precisa = rotulagemIds.has(p.id);
       if (precisa !== p.precisa_rotulagem) {
         await supabase.from("pedidos_producao").update({ precisa_rotulagem: precisa }).eq("id", p.id);
+        notifyMutation("pedidos_producao");
       }
     }
 
@@ -361,6 +365,7 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
       if (error) { toast.error(`Erro a criar OP de ${p.produto_nome}: ${error.message}`); continue; }
       opsCriadas++;
       pedidosOk++;
+      notifyMutation("ordens_producao");
       // Estado mantém-se "programado". Passa a "em_producao" quando operador iniciar a OP (trigger DB).
     }
     toast.success(`${pedidosOk} pedidos submetidos · ${opsCriadas} OPs criadas · ${rotulagemIds.size} para rotulagem`);
@@ -400,8 +405,9 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
     for (const p of candidatos) {
       const { error: eDel } = await supabase.from("ordens_producao").delete().eq("pedido_id", p.id);
       if (eDel) { toast.error(`Erro a apagar OPs de ${p.produto_nome}`); continue; }
+      notifyMutation("ordens_producao");
       const { error: eUpd } = await supabase.from("pedidos_producao").update({ estado: "programado" }).eq("id", p.id);
-      if (!eUpd) ok++;
+      if (!eUpd) { ok++; notifyMutation("pedidos_producao"); }
     }
     toast.success(`${ok} pedidos anulados`);
     setConfirmAnular(null);
@@ -445,7 +451,7 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
     if (idsParaApagar.length > 0) {
       const { error: errDel } = await supabase.from("ordens_producao").delete().in("id", idsParaApagar);
       if (errDel) toast.error(`Erro a apagar OPs: ${errDel.message}`);
-      else opsApagadas = idsParaApagar.length;
+      else { opsApagadas = idsParaApagar.length; notifyMutation("ordens_producao"); }
     }
 
     // Desagendar pedidos; os que têm OPs tocadas mantêm estado (continuam em produção)
@@ -457,7 +463,10 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
       if (!temTocadas && p.estado === "programado") update.estado = "pendente";
       if (temTocadas) mantidos++;
       const { error } = await supabase.from("pedidos_producao").update(update).eq("id", p.id);
-      if (!error && !temTocadas) desagendados++;
+      if (!error) {
+        notifyMutation("pedidos_producao");
+        if (!temTocadas) desagendados++;
+      }
     }
 
     const partes: string[] = [];

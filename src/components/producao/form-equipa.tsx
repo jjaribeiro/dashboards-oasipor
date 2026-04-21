@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase/client";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { ZONA_LABEL } from "@/lib/constants";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -33,20 +34,21 @@ export function FormEquipa({ open, onOpenChange, zonaId, funcionarios, responsav
       .eq("id", zonaId);
     setSavingResp(false);
     if (error) toast.error("Erro ao guardar responsável");
-    else toast.success("Responsável atualizado");
+    else { notifyMutation("zonas_producao"); toast.success("Responsável atualizado"); }
   }
 
   async function toggle(f: Funcionario) {
     const nova = f.zona_atual === zonaId ? null : zonaId;
     const { error } = await supabase.from("funcionarios").update({ zona_atual: nova }).eq("id", f.id);
     if (error) toast.error("Erro a atribuir");
+    else notifyMutation("funcionarios");
   }
 
   async function apagar(f: Funcionario) {
     if (!confirm(`Apagar ${f.nome}?`)) return;
     const { error } = await supabase.from("funcionarios").delete().eq("id", f.id);
     if (error) toast.error("Erro ao apagar");
-    else toast.success(`${f.nome} apagado`);
+    else { notifyMutation("funcionarios"); toast.success(`${f.nome} apagado`); }
   }
 
   async function criar() {
@@ -62,6 +64,7 @@ export function FormEquipa({ open, onOpenChange, zonaId, funcionarios, responsav
     setLoading(false);
     if (error) toast.error("Erro a criar funcionário");
     else {
+      notifyMutation("funcionarios");
       toast.success("Funcionário adicionado");
       setNewName("");
     }
