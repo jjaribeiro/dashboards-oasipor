@@ -20,13 +20,24 @@ export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) 
   const { items: funcionarios, refetch: refetchFunc } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
   const { items: produtos, refetch: refetchProd } = useRealtimeTable<Produto>("produtos", initialProdutos, { orderBy: "referencia" });
   const [tab, setTab] = useState<Tab>("funcionarios");
-  const { session } = usePessoaSession();
+  const { session, login } = usePessoaSession();
+  const [pinInput, setPinInput] = useState("");
+  const [pinOpen, setPinOpen] = useState(false);
+  const [pinError, setPinError] = useState(false);
 
   const isAdmin = useMemo(() => {
     if (!session) return false;
     const func = funcionarios.find((f) => f.nome === session.pessoaNome);
     return func?.acessos?.includes("dados") ?? false;
   }, [session, funcionarios]);
+
+  async function handlePinLogin() {
+    setPinError(false);
+    const pessoa = await login(pinInput.trim());
+    if (!pessoa) { setPinError(true); return; }
+    setPinInput("");
+    setPinOpen(false);
+  }
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "funcionarios", label: "Funcionários", count: funcionarios.length },
@@ -43,7 +54,41 @@ export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) 
           </svg>
         </a>
         <h1 className="text-2xl font-extrabold text-slate-900">Dados</h1>
+        <div className="ml-auto flex items-center gap-2">
+          {session ? (
+            <span className="text-xs font-bold text-slate-500">{session.pessoaNome}</span>
+          ) : (
+            <button
+              onClick={() => setPinOpen(true)}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100"
+              title="Entrar como administrador"
+            >🔑 Admin</button>
+          )}
+        </div>
       </div>
+
+      {pinOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setPinOpen(false)}>
+          <div className="w-72 rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-3 text-sm font-extrabold text-slate-900">🔑 Entrar como admin</h3>
+            <input
+              type="password"
+              inputMode="numeric"
+              value={pinInput}
+              onChange={(e) => { setPinInput(e.target.value); setPinError(false); }}
+              onKeyDown={(e) => e.key === "Enter" && handlePinLogin()}
+              placeholder="PIN"
+              autoFocus
+              className={cn("w-full rounded-lg border px-3 py-2 text-center text-lg font-mono font-extrabold tracking-[0.4em] focus:outline-none", pinError ? "border-red-400 bg-red-50" : "border-slate-200")}
+            />
+            {pinError && <p className="mt-1 text-center text-[11px] font-bold text-red-500">PIN inválido</p>}
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => setPinOpen(false)} className="flex-1 rounded-lg border border-slate-200 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">Cancelar</button>
+              <button onClick={handlePinLogin} className="flex-1 rounded-lg bg-slate-800 py-2 text-xs font-extrabold text-white hover:bg-slate-700">Entrar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-1 border-b border-slate-200 pb-0">
         {tabs.map((t) => (
@@ -411,29 +456,25 @@ function GridFuncionarios({ items, refetch, pessoaNome }: { items: Funcionario[]
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Departamento</label>
-                      <input
+                      <select
                         value={data.departamento}
                         onChange={(e) => setData((d) => ({ ...d, departamento: e.target.value }))}
-                        list="deps-list"
                         className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-semibold"
-                        placeholder="Ex: Produção"
-                      />
-                      <datalist id="deps-list">
-                        {DEPARTAMENTOS.map((d) => <option key={d} value={d} />)}
-                      </datalist>
+                      >
+                        <option value="">— selecionar —</option>
+                        {DEPARTAMENTOS.map((d) => <option key={d} value={d}>{d}</option>)}
+                      </select>
                     </div>
                     <div>
                       <label className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Função</label>
-                      <input
+                      <select
                         value={data.funcao}
                         onChange={(e) => setData((d) => ({ ...d, funcao: e.target.value }))}
-                        list="fn-list"
                         className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-semibold"
-                        placeholder="Ex: Operador"
-                      />
-                      <datalist id="fn-list">
-                        {FUNCOES.map((f) => <option key={f} value={f} />)}
-                      </datalist>
+                      >
+                        <option value="">— selecionar —</option>
+                        {FUNCOES.map((f) => <option key={f} value={f}>{f}</option>)}
+                      </select>
                     </div>
                   </div>
                 </section>
