@@ -303,7 +303,7 @@ function KpiCard({ label, value, sub, color }: { label: string; value: string; s
   );
 }
 
-const ROTULAGEM_PER_PAGE = 7;
+const ROTULAGEM_PER_PAGE = 5;
 const ROTULAGEM_ROTATION_SECONDS = 15;
 
 function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorDia: PedidoProducao[][] }) {
@@ -343,7 +343,7 @@ function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorD
           <div key={`${page}-${totalPages}`} className="h-full bg-blue-400" style={{ animation: `progressFill ${ROTULAGEM_ROTATION_SECONDS}s linear` }} />
         </div>
       )}
-      <ul className="grid min-h-0 flex-1 grid-rows-7 gap-2 overflow-hidden p-2">
+      <ul className="grid min-h-0 flex-1 grid-rows-5 gap-2 overflow-hidden p-2">
         {pageRows.map((r, idx) => {
           if (r.tipo === "dia") {
             const hoje = isSameDay(r.dia, new Date());
@@ -412,7 +412,7 @@ function RotulagemCarousel({ ops, pedidoPorId }: { ops: OrdemProducao[]; pedidoP
         </div>
       )}
 
-      <ul className="grid min-h-0 flex-1 grid-rows-7 gap-2 overflow-hidden p-2">
+      <ul className="grid min-h-0 flex-1 grid-rows-5 gap-2 overflow-hidden p-2">
         {pageOps.map((op) => {
           const ped = op.pedido_id ? pedidoPorId.get(op.pedido_id) : null;
           return (
