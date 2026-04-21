@@ -1,12 +1,7 @@
 import type { Metadata } from "next";
-import dynamic from "next/dynamic";
 import { Toaster } from "@/components/ui/sonner";
+import { FeedbackButtonWrapper } from "@/components/feedback-button-wrapper";
 import "./globals.css";
-
-const FeedbackButton = dynamic(
-  () => import("@/components/feedback-button").then((m) => m.FeedbackButton),
-  { ssr: false }
-);
 
 export const metadata: Metadata = {
   title: "Dashboards Oasipor",
@@ -28,7 +23,7 @@ export default function RootLayout({
       </head>
       <body className="h-full overflow-hidden bg-slate-50 text-slate-900 font-semibold" style={{ fontFamily: "'Inter', sans-serif" }}>
         {children}
-        <FeedbackButton />
+        <FeedbackButtonWrapper />
         <Toaster position="bottom-right" />
       </body>
     </html>
