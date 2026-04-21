@@ -1,6 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ProducaoKpisShell } from "@/components/producao/producao-kpis-shell";
-import { DashboardAuthGate } from "@/components/dashboard-auth-gate";
+import { FuncionarioAuthGate } from "@/components/funcionario-auth-gate";
 import type { OrdemProducao, PedidoProducao, ZonaProducao, ProducaoRejeito, ProducaoPausa, AuditLog, MetaCategoria } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ export default async function KpisPage() {
   ]);
 
   return (
-    <DashboardAuthGate dashboardKey="kpis" title="Produção — KPIs">
+    <FuncionarioAuthGate requiredAccess="kpis" title="KPIs">
       <main className="h-full">
         <ProducaoKpisShell
           initialZonas={(zonas.data ?? []) as ZonaProducao[]}
@@ -35,6 +35,6 @@ export default async function KpisPage() {
           initialMetas={(metas.data ?? []) as MetaCategoria[]}
         />
       </main>
-    </DashboardAuthGate>
+    </FuncionarioAuthGate>
   );
 }

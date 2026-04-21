@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase/client";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { RESPONSAVEIS } from "@/lib/constants";
 import { toast } from "sonner";
 import type { Amostra } from "@/lib/types";
@@ -51,6 +52,7 @@ export function FormAmostra({ open, onOpenChange, editItem }: FormAmostraProps) 
       toast.error("Erro ao guardar amostra");
       return;
     }
+    notifyMutation("amostras");
     toast.success(editItem ? "Amostra atualizada" : "Amostra adicionada");
     onOpenChange(false);
   }

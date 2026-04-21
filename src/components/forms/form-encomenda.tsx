@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase/client";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { RESPONSAVEIS } from "@/lib/constants";
 import { toast } from "sonner";
 import type { Encomenda } from "@/lib/types";
@@ -50,6 +51,7 @@ export function FormEncomenda({ open, onOpenChange, editItem }: FormEncomendaPro
       toast.error("Erro ao guardar encomenda");
       return;
     }
+    notifyMutation("encomendas");
     toast.success(editItem ? "Encomenda atualizada" : "Encomenda adicionada");
     onOpenChange(false);
   }

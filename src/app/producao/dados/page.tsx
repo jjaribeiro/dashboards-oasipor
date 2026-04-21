@@ -1,5 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { DadosGrid } from "@/components/producao/dados-grid";
+import { FuncionarioAuthGate } from "@/components/funcionario-auth-gate";
 import type { Funcionario, Produto } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -13,11 +14,13 @@ export default async function ProducaoDados() {
   ]);
 
   return (
-    <main className="min-h-dvh bg-slate-50">
-      <DadosGrid
-        initialFuncionarios={(funcionarios.data ?? []) as Funcionario[]}
-        initialProdutos={(produtos.data ?? []) as Produto[]}
-      />
-    </main>
+    <FuncionarioAuthGate requiredAccess="dados" title="Dados">
+      <main className="min-h-dvh bg-slate-50">
+        <DadosGrid
+          initialFuncionarios={(funcionarios.data ?? []) as Funcionario[]}
+          initialProdutos={(produtos.data ?? []) as Produto[]}
+        />
+      </main>
+    </FuncionarioAuthGate>
   );
 }

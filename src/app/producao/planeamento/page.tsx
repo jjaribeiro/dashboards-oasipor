@@ -1,6 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { PlaneamentoShell } from "@/components/producao/planeamento-shell";
-import { DashboardAuthGate } from "@/components/dashboard-auth-gate";
+import { FuncionarioAuthGate } from "@/components/funcionario-auth-gate";
 import type { OrdemProducao, ZonaProducao, AuditLog, ProducaoRejeito, ProducaoPausa, MetaCategoria, PedidoProducao, Funcionario, PaleteEO, Produto } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ export default async function PlaneamentoPage() {
   ]);
 
   return (
-    <DashboardAuthGate dashboardKey="planeamento" title="Produção — Planeamento" hideBadge>
+    <FuncionarioAuthGate requiredAccess="planeamento" title="Planeamento">
       <main className="h-full">
         <PlaneamentoShell
           initialZonas={(zonas.data ?? []) as ZonaProducao[]}
@@ -40,6 +40,6 @@ export default async function PlaneamentoPage() {
           initialProdutos={(produtos.data ?? []) as Produto[]}
         />
       </main>
-    </DashboardAuthGate>
+    </FuncionarioAuthGate>
   );
 }

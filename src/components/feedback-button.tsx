@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { toast } from "sonner";
 
 export function FeedbackButton() {
@@ -25,6 +26,7 @@ export function FeedbackButton() {
     });
     setSending(false);
     if (error) { toast.error("Erro ao enviar sugestão"); return; }
+    notifyMutation("sugestoes");
     toast.success("Sugestão enviada, obrigado!");
     setTexto("");
     setNome("");
@@ -35,7 +37,7 @@ export function FeedbackButton() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-5 right-5 z-40 flex items-center gap-1.5 rounded-full border border-slate-300 bg-white/90 px-3 py-1.5 text-[11px] font-extrabold text-slate-600 shadow-sm backdrop-blur-sm transition-all hover:bg-white hover:shadow-md"
+        className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-extrabold text-slate-500 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-700"
         title="Enviar sugestão de melhoria"
       >
         💡 Sugestão

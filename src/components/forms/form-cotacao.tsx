@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/lib/supabase/client";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import { RESPONSAVEIS } from "@/lib/constants";
 import { toast } from "sonner";
 import type { Cotacao } from "@/lib/types";
@@ -50,6 +51,7 @@ export function FormCotacao({ open, onOpenChange, editItem }: FormCotacaoProps) 
       toast.error("Erro ao guardar cotação");
       return;
     }
+    notifyMutation("cotacoes");
     toast.success(editItem ? "Cotação atualizada" : "Cotação adicionada");
     onOpenChange(false);
   }

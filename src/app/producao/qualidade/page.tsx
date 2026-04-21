@@ -1,6 +1,6 @@
 import { createServerSupabase } from "@/lib/supabase/server";
 import { QualidadeTvPanel } from "@/components/producao/qualidade-tv-panel";
-import { DashboardAuthGate } from "@/components/dashboard-auth-gate";
+import { FuncionarioAuthGate } from "@/components/funcionario-auth-gate";
 import type { OrdemProducao, PedidoProducao, RotulagemInspecao, CqInspecao, NaoConformidade } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default async function QualidadeTvPage() {
   ]);
 
   return (
-    <DashboardAuthGate dashboardKey="qualidade" title="Dashboard Qualidade">
+    <FuncionarioAuthGate requiredAccess="qualidade" title="Qualidade">
       <main className="h-dvh overflow-hidden">
         <QualidadeTvPanel
           ops={(ops.data ?? []) as OrdemProducao[]}
@@ -29,6 +29,6 @@ export default async function QualidadeTvPage() {
           initialNcs={(ncs.data ?? []) as NaoConformidade[]}
         />
       </main>
-    </DashboardAuthGate>
+    </FuncionarioAuthGate>
   );
 }

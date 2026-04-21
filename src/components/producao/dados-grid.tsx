@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useRealtimeTable, notifyMutation } from "@/hooks/use-realtime-table";
 import { usePessoaSession } from "@/hooks/use-pessoa-session";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
@@ -648,7 +648,7 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
     }).eq("id", editId);
     setSaving(false);
     if (error) toast.error("Erro ao guardar");
-    else { toast.success("Guardado"); setEditId(null); refetch(); }
+    else { notifyMutation("produtos"); toast.success("Guardado"); setEditId(null); refetch(); }
   }, [editId, editData, refetch]);
 
   const addNew = useCallback(async () => {
@@ -663,14 +663,14 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
     });
     setSaving(false);
     if (error) toast.error("Erro ao criar");
-    else { toast.success("Produto criado"); setNewRow(false); setNewData({ referencia: "", descricao: "", tipo: "", tipo_caixa: "", qtd_por_caixa: "" }); refetch(); }
+    else { notifyMutation("produtos"); toast.success("Produto criado"); setNewRow(false); setNewData({ referencia: "", descricao: "", tipo: "", tipo_caixa: "", qtd_por_caixa: "" }); refetch(); }
   }, [newData, refetch]);
 
   const remove = useCallback(async (id: string) => {
     if (!confirm("Apagar este produto?")) return;
     const { error } = await supabase.from("produtos").delete().eq("id", id);
     if (error) toast.error("Erro ao apagar");
-    else { toast.success("Apagado"); refetch(); }
+    else { notifyMutation("produtos"); toast.success("Apagado"); refetch(); }
   }, [refetch]);
 
   // ---- Excel Import ----
@@ -739,6 +739,7 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
     setImportRows(null);
 
     if (errors > 0) toast.error(`Alguns lotes falharam (${errors} erros)`);
+    if (inserted > 0) notifyMutation("produtos");
     toast.success(`${inserted} produtos importados`);
     refetch();
   }
@@ -999,6 +1000,7 @@ function TabelaSugestoes() {
   async function apagar(id: string) {
     if (!confirm("Apagar esta sugestão?")) return;
     await supabase.from("sugestoes").delete().eq("id", id);
+    notifyMutation("sugestoes");
     setItems((prev) => prev.filter((s) => s.id !== id));
   }
 

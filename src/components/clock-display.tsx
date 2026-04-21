@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
+import { FeedbackButton } from "@/components/feedback-button";
 
 export function ClockDisplay() {
   const [mounted, setMounted] = useState(false);
@@ -25,6 +26,7 @@ export function ClockDisplay() {
 
   return (
     <div className="flex items-center gap-4 text-slate-600" suppressHydrationWarning>
+      <FeedbackButton />
       <span className="text-2xl font-bold tabular-nums" suppressHydrationWarning>
         {format(now, "HH:mm:ss")}
       </span>

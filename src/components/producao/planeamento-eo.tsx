@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
-import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useRealtimeTable, notifyMutation } from "@/hooks/use-realtime-table";
 import { cn } from "@/lib/utils";
 import type { EquipamentoCiclo, OrdemProducao, PaleteEO, Produto, TipoCaixa } from "@/lib/types";
 
@@ -98,7 +98,7 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
       if (faltam.length > 0) {
         supabase.from("paletes_eo").insert(faltam.map((f) => ({ numero: f.numero, estado: "planeamento" }))).then(({ error }) => {
           if (error) console.error("seed paletes", error);
-          else refetchPaletes();
+          else { notifyMutation("paletes_eo"); refetchPaletes(); }
         });
       }
     }
@@ -160,10 +160,12 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
       num_caixas: info?.numCaixas ?? null,
     }).eq("id", opId);
     if (eOp) { toast.error("Erro a atribuir OP"); return; }
+    notifyMutation("ordens_producao");
 
     // Definir tipo_caixa da palete se ainda não tinha
     if (!palete.tipo_caixa && produtoTipoCaixa) {
       await supabase.from("paletes_eo").update({ tipo_caixa: produtoTipoCaixa }).eq("id", paleteId);
+      notifyMutation("paletes_eo");
     }
     toast.success(`OP movida para palete ${palete.numero}`);
   }, [ops, paletes, opsPorPalete, disponiveis]);
@@ -171,7 +173,7 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
   const removerDaPalete = useCallback(async (opId: string) => {
     const { error } = await supabase.from("ordens_producao").update({ palete_eo_id: null }).eq("id", opId);
     if (error) toast.error("Erro a remover");
-    else toast.success("Removido da palete");
+    else { notifyMutation("ordens_producao"); toast.success("Removido da palete"); }
   }, []);
 
   const limparPalete = useCallback(async (paleteId: string) => {
@@ -181,7 +183,9 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     for (const it of items) {
       await supabase.from("ordens_producao").update({ palete_eo_id: null }).eq("id", it.op.id);
     }
+    notifyMutation("ordens_producao");
     await supabase.from("paletes_eo").update({ tipo_caixa: null }).eq("id", paleteId);
+    notifyMutation("paletes_eo");
     toast.success("Palete limpa");
   }, [opsPorPalete]);
 
@@ -214,10 +218,12 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
       .select()
       .single();
     if (eCiclo || !cicloData) { toast.error("Erro a criar ciclo"); return; }
+    notifyMutation("equipamento_ciclo");
 
     // 2) Marcar paletes como fechadas e ligar ao ciclo
     const idsPaletes = paletesComConteudo.map((p) => p.id);
     await supabase.from("paletes_eo").update({ estado: "em_pre_cond", ciclo_id: cicloData.id, fechada_em: new Date().toISOString() }).in("id", idsPaletes);
+    notifyMutation("paletes_eo");
 
     // 3) O seed effect cria novas paletes de planeamento automaticamente quando este ciclo é fechado
     toast.success(`Ciclo fechado → ${ZONA_CICLO_LABEL[preCond]}`);
