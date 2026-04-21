@@ -37,20 +37,23 @@ export function OPsTab({ ops, pedidos, zonas }: { ops: OrdemProducao[]; pedidos:
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return ops.filter((o) => {
-      if (estado && o.estado !== estado) return false;
-      if (zonaFiltro && o.zona_id !== zonaFiltro) return false;
-      if (!q) return true;
-      const ped = o.pedido_id ? pedidoPorId.get(o.pedido_id) : null;
-      return (
-        (o.produto_codigo ?? "").toLowerCase().includes(q) ||
-        (o.produto_nome ?? "").toLowerCase().includes(q) ||
-        (o.cliente ?? "").toLowerCase().includes(q) ||
-        (o.numero ?? "").toLowerCase().includes(q) ||
-        (o.lote ?? "").toLowerCase().includes(q) ||
-        (ped?.numero ?? "").toLowerCase().includes(q)
-      );
-    });
+    return ops
+      .filter((o) => {
+        if (estado && o.estado !== estado) return false;
+        if (zonaFiltro && o.zona_id !== zonaFiltro) return false;
+        if (!q) return true;
+        const ped = o.pedido_id ? pedidoPorId.get(o.pedido_id) : null;
+        return (
+          (o.produto_codigo ?? "").toLowerCase().includes(q) ||
+          (o.produto_nome ?? "").toLowerCase().includes(q) ||
+          (o.cliente ?? "").toLowerCase().includes(q) ||
+          (o.numero ?? "").toLowerCase().includes(q) ||
+          (o.lote ?? "").toLowerCase().includes(q) ||
+          (ped?.numero ?? "").toLowerCase().includes(q)
+        );
+      })
+      // Stable sort: by created_at ASC so editing doesn't shuffle rows
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   }, [ops, search, estado, zonaFiltro, pedidoPorId]);
 
   function abrirEdit(op: OrdemProducao) {

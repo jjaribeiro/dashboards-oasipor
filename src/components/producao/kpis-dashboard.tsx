@@ -51,9 +51,13 @@ function pctDelta(curr: number, prev: number): number {
   return ((curr - prev) / prev) * 100;
 }
 
+type SubTab = "geral" | "por_area" | "operacional" | "custo";
+
 export function KpisDashboard({ zonas, pedidos, ops, rejeitos, pausas, audit, metas }: Props) {
   void audit; void rejeitos; // reservados
   const [periodo, setPeriodo] = useState<Periodo>("semana");
+  const [subTab, setSubTab] = useState<SubTab>("geral");
+  const [custoHora, setCustoHora] = useState<number>(12); // €/hora — editável pelo utilizador
 
   const { ini, fim, prevIni, prevFim, label: deltaLabel } = useMemo(() => rangeFor(periodo), [periodo]);
 
@@ -221,6 +225,11 @@ export function KpisDashboard({ zonas, pedidos, ops, rejeitos, pausas, audit, me
   const metaPacks = metaFor("packs_trouxas");
   const metaCampos = metaFor("campos_cirurgicos");
 
+  // Custo homem hora
+  const totalHorasProducao = data.packsHora > 0 ? data.unidades / data.packsHora : 0;
+  const custoTotal = totalHorasProducao * custoHora;
+  const custoPorUnidade = data.unidades > 0 ? custoTotal / data.unidades : 0;
+
   return (
     <div className="flex h-full flex-col gap-3">
       {/* Header compacto */}
@@ -233,19 +242,15 @@ export function KpisDashboard({ zonas, pedidos, ops, rejeitos, pausas, audit, me
           <Link href="/producao/planeamento" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50">← Planeamento</Link>
           <div className="flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-bold">
             {(["hoje", "semana", "mes"] as Periodo[]).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPeriodo(p)}
+              <button key={p} onClick={() => setPeriodo(p)}
                 className={periodo === p ? "rounded-md bg-slate-900 px-2.5 py-1 text-white" : "rounded-md px-2.5 py-1 text-slate-600 hover:bg-slate-100"}
-              >
-                {p === "hoje" ? "Hoje" : p === "semana" ? "Esta semana" : "Este mês"}
-              </button>
+              >{p === "hoje" ? "Hoje" : p === "semana" ? "Esta semana" : "Este mês"}</button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Row 1: 6 KPI cards */}
+      {/* KPIs principais — sempre visíveis */}
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
         <KpiCard label="OEE" value={`${data.oeePct.toFixed(0)}%`} delta={deltaOee} deltaUnit="pp" tone={data.oeePct >= 70 ? "emerald" : data.oeePct >= 50 ? "amber" : "red"} icon="⚡" />
         <KpiCard label="Unidades produzidas" value={data.unidades.toLocaleString("pt-PT")} delta={deltaUnidades} deltaUnit="%" tone="sky" icon="📦" />
@@ -255,110 +260,107 @@ export function KpisDashboard({ zonas, pedidos, ops, rejeitos, pausas, audit, me
         <KpiCard label="Lead time médio" value={`${data.leadTimeDias.toFixed(1)} d`} sub={`${Math.round(data.minParados)} min parados`} tone="slate" icon="⏱" />
       </div>
 
-      {/* Row 2: 4 novos KPIs */}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <KpiCard
-          label="Packs / hora"
-          value={data.packsHora.toLocaleString("pt-PT")}
-          sub="média período"
-          tone="sky"
-          icon="⚡"
-        />
-        <KpiCard
-          label="Cycle time"
-          value={data.cycleTimeSeg >= 60 ? `${Math.floor(data.cycleTimeSeg / 60)}m ${data.cycleTimeSeg % 60}s` : `${data.cycleTimeSeg}s`}
-          sub="por pack"
-          tone="violet"
-          icon="🔄"
-        />
-        <KpiCard
-          label="On-time delivery"
-          value={`${data.onTimePct.toFixed(0)}%`}
-          sub="OPs a tempo"
-          tone={data.onTimePct >= 90 ? "emerald" : data.onTimePct >= 70 ? "amber" : "red"}
-          icon="🚚"
-        />
-        <KpiCard
-          label="Setup time médio"
-          value={data.setupTimeMin >= 60 ? `${(data.setupTimeMin / 60).toFixed(1)}h` : `${Math.round(data.setupTimeMin)}m`}
-          sub="criação → início"
-          tone={data.setupTimeMin <= 30 ? "emerald" : data.setupTimeMin <= 120 ? "amber" : "red"}
-          icon="🔧"
-        />
+      {/* Sub-tabs */}
+      <div className="flex gap-1 border-b border-slate-200">
+        {([
+          { id: "geral", label: "📊 Geral" },
+          { id: "por_area", label: "🏭 Por Área" },
+          { id: "operacional", label: "⚙️ Operacional" },
+          { id: "custo", label: "💶 Custo" },
+        ] as { id: SubTab; label: string }[]).map((t) => (
+          <button key={t.id} onClick={() => setSubTab(t.id)}
+            className={`border-b-2 px-3 py-1.5 text-xs font-extrabold transition-colors ${subTab === t.id ? "border-emerald-500 text-emerald-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+          >{t.label}</button>
+        ))}
       </div>
 
-      {/* Row 3: Breakdown por sala */}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        {(["sala_limpa_1", "sala_limpa_2", "esterilizacao", "embalamento"] as const).map((area) => {
-          const areaLabel: Record<string, string> = {
-            sala_limpa_1: "SL1 — Produção",
-            sala_limpa_2: "SL2 — Linhas",
-            esterilizacao: "Esterilização",
-            embalamento: "Embalamento",
-          };
-          const areaZonas = zonas.filter((z) => z.area === area);
-          const unidsArea = areaZonas.reduce((a, z) => a + (data.prodZona.get(z.id) || 0), 0);
-          const filaArea = areaZonas.reduce((a, z) => a + (data.fila.get(z.id) || 0), 0);
-          const topZona = areaZonas.reduce<{ zona: ZonaProducao | null; v: number }>((best, z) => {
-            const v = data.prodZona.get(z.id) || 0;
-            return v > best.v ? { zona: z, v } : best;
-          }, { zona: null, v: 0 });
-          return (
-            <div key={area} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">{areaLabel[area] ?? area}</p>
-              <p className="mt-1 text-xl font-black text-slate-900">{unidsArea.toLocaleString("pt-PT")} <span className="text-sm font-bold text-slate-400">un</span></p>
-              <p className="text-[10px] font-bold text-slate-500">{filaArea} OP{filaArea !== 1 ? "s" : ""} na fila</p>
-              {topZona.zona && topZona.v > 0 && (
-                <p className="mt-1 truncate text-[10px] font-bold text-emerald-600" title={ZONA_LABEL[topZona.zona.id] ?? topZona.zona.nome}>
-                  ▲ {ZONA_LABEL[topZona.zona.id] ?? topZona.zona.nome}: {topZona.v.toLocaleString("pt-PT")} un
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Row 4: Charts + OEE gauge + Metas */}
+      {/* Sub-tab content */}
       <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-12 gap-3">
-        {/* Trend line 14 dias */}
-        <Panel titulo="Produção diária — últimos 14 dias" className="col-span-12 lg:col-span-6">
-          <SparkArea data={data.serie14} />
-        </Panel>
+        {subTab === "geral" && (<>
+          <Panel titulo="Produção diária — últimos 14 dias" className="col-span-12 lg:col-span-6">
+            <SparkArea data={data.serie14} />
+          </Panel>
+          <Panel titulo="OEE — decomposição" className="col-span-6 lg:col-span-3">
+            <div className="flex h-full flex-col items-center justify-between">
+              <Gauge value={data.oeePct} size={130} />
+              <div className="grid w-full grid-cols-3 gap-1 text-center text-[10px] font-extrabold">
+                <MiniStat label="Disp." value={`${(data.availability * 100).toFixed(0)}%`} tone="sky" />
+                <MiniStat label="Perf." value={`${(data.performance * 100).toFixed(0)}%`} tone="violet" />
+                <MiniStat label="Qual." value={`${(data.quality * 100).toFixed(0)}%`} tone="emerald" />
+              </div>
+            </div>
+          </Panel>
+          <Panel titulo="Metas vs produzido" className="col-span-6 lg:col-span-3">
+            <div className="flex h-full flex-col justify-center gap-3">
+              <MetaBar label="Packs/Trouxas" atual={data.packsProduzidos} meta={metaPacks} tone="emerald" />
+              <MetaBar label="Campos Cirúrgicos" atual={data.camposProduzidos} meta={metaCampos} tone="sky" />
+            </div>
+          </Panel>
+          <Panel titulo="Produção por zona" className="col-span-12 md:col-span-6 lg:col-span-4">
+            <BarsZona zonas={zonas} valores={data.prodZona} unidade="un" tone="emerald" />
+          </Panel>
+          <Panel titulo="Fila de OPs (agora)" className="col-span-12 md:col-span-6 lg:col-span-4">
+            <BarsZona zonas={zonas} valores={data.fila} unidade="OP" tone="amber" />
+          </Panel>
+          <Panel titulo="Top operadores" className="col-span-12 md:col-span-6 lg:col-span-4">
+            <TopOperadores prodOp={data.prodOp} />
+          </Panel>
+        </>)}
 
-        {/* OEE gauge + decomposição */}
-        <Panel titulo="OEE — decomposição" className="col-span-6 lg:col-span-3">
-          <div className="flex h-full flex-col items-center justify-between">
-            <Gauge value={data.oeePct} size={130} />
-            <div className="grid w-full grid-cols-3 gap-1 text-center text-[10px] font-extrabold">
-              <MiniStat label="Disp." value={`${(data.availability * 100).toFixed(0)}%`} tone="sky" />
-              <MiniStat label="Perf." value={`${(data.performance * 100).toFixed(0)}%`} tone="violet" />
-              <MiniStat label="Qual." value={`${(data.quality * 100).toFixed(0)}%`} tone="emerald" />
+        {subTab === "por_area" && (
+          <div className="col-span-12 grid grid-cols-2 content-start gap-3 md:grid-cols-4">
+            {(["sala_limpa_1", "sala_limpa_2", "esterilizacao", "embalamento"] as const).map((area) => {
+              const areaLabel: Record<string, string> = {
+                sala_limpa_1: "SL1 — Produção", sala_limpa_2: "SL2 — Linhas",
+                esterilizacao: "Esterilização", embalamento: "Embalamento",
+              };
+              const areaZonas = zonas.filter((z) => z.area === area);
+              const unidsArea = areaZonas.reduce((a, z) => a + (data.prodZona.get(z.id) || 0), 0);
+              const filaArea = areaZonas.reduce((a, z) => a + (data.fila.get(z.id) || 0), 0);
+              const topZona = areaZonas.reduce<{ zona: ZonaProducao | null; v: number }>((best, z) => {
+                const v = data.prodZona.get(z.id) || 0;
+                return v > best.v ? { zona: z, v } : best;
+              }, { zona: null, v: 0 });
+              return (
+                <div key={area} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">{areaLabel[area] ?? area}</p>
+                  <p className="mt-1 text-2xl font-black text-slate-900">{unidsArea.toLocaleString("pt-PT")} <span className="text-sm font-bold text-slate-400">un</span></p>
+                  <p className="text-xs font-bold text-slate-500">{filaArea} OP{filaArea !== 1 ? "s" : ""} na fila</p>
+                  {topZona.zona && topZona.v > 0 && (
+                    <p className="mt-1 truncate text-[10px] font-bold text-emerald-600">▲ {ZONA_LABEL[topZona.zona.id] ?? topZona.zona.nome}: {topZona.v.toLocaleString("pt-PT")} un</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {subTab === "operacional" && (
+          <div className="col-span-12 grid grid-cols-2 content-start gap-3 md:grid-cols-4">
+            <KpiCard label="Packs / hora" value={data.packsHora.toLocaleString("pt-PT")} sub="média período" tone="sky" icon="⚡" />
+            <KpiCard label="Cycle time" value={data.cycleTimeSeg >= 60 ? `${Math.floor(data.cycleTimeSeg / 60)}m ${data.cycleTimeSeg % 60}s` : `${data.cycleTimeSeg}s`} sub="por pack" tone="violet" icon="🔄" />
+            <KpiCard label="On-time delivery" value={`${data.onTimePct.toFixed(0)}%`} sub="OPs a tempo" tone={data.onTimePct >= 90 ? "emerald" : data.onTimePct >= 70 ? "amber" : "red"} icon="🚚" />
+            <KpiCard label="Setup time médio" value={data.setupTimeMin >= 60 ? `${(data.setupTimeMin / 60).toFixed(1)}h` : `${Math.round(data.setupTimeMin)}m`} sub="criação → início" tone={data.setupTimeMin <= 30 ? "emerald" : data.setupTimeMin <= 120 ? "amber" : "red"} icon="🔧" />
+          </div>
+        )}
+
+        {subTab === "custo" && (
+          <div className="col-span-12 flex flex-col gap-4">
+            <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4">
+              <label className="text-sm font-extrabold text-slate-700">Custo por hora (€/h):</label>
+              <input type="number" min={0} step={0.5} value={custoHora}
+                onChange={(e) => setCustoHora(Math.max(0, Number(e.target.value)))}
+                className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-bold" />
+              <span className="text-xs font-bold text-slate-500">Apenas para estimativa — não gravado</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <KpiCard label="Horas de produção" value={totalHorasProducao.toFixed(1) + "h"} sub={`${data.unidades.toLocaleString("pt-PT")} unidades`} tone="slate" icon="⏱" />
+              <KpiCard label="Custo total estimado" value={`${custoTotal.toFixed(0)} €`} sub={`${custoHora} €/h`} tone="amber" icon="💶" />
+              <KpiCard label="Custo por unidade" value={`${custoPorUnidade.toFixed(3)} €`} sub="estimativa" tone={custoPorUnidade < 0.1 ? "emerald" : custoPorUnidade < 0.5 ? "amber" : "red"} icon="📦" />
+              <KpiCard label="Min. parados" value={`${Math.round(data.minParados)} min`} sub="custo parado" tone={data.minParados < 30 ? "emerald" : data.minParados < 120 ? "amber" : "red"} icon="⏸" />
             </div>
           </div>
-        </Panel>
-
-        {/* Metas vs produzido */}
-        <Panel titulo="Metas vs produzido" className="col-span-6 lg:col-span-3">
-          <div className="flex h-full flex-col justify-center gap-3">
-            <MetaBar label="Packs/Trouxas" atual={data.packsProduzidos} meta={metaPacks} tone="emerald" />
-            <MetaBar label="Campos Cirúrgicos" atual={data.camposProduzidos} meta={metaCampos} tone="sky" />
-          </div>
-        </Panel>
-
-        {/* Produção por zona */}
-        <Panel titulo="Produção por zona" className="col-span-12 md:col-span-6 lg:col-span-4">
-          <BarsZona zonas={zonas} valores={data.prodZona} unidade="un" tone="emerald" />
-        </Panel>
-
-        {/* Fila por zona agora */}
-        <Panel titulo="Fila de OPs (agora)" className="col-span-12 md:col-span-6 lg:col-span-4">
-          <BarsZona zonas={zonas} valores={data.fila} unidade="OP" tone="amber" />
-        </Panel>
-
-        {/* Top operadores */}
-        <Panel titulo="Top operadores" className="col-span-12 md:col-span-6 lg:col-span-4">
-          <TopOperadores prodOp={data.prodOp} />
-        </Panel>
+        )}
       </div>
     </div>
   );

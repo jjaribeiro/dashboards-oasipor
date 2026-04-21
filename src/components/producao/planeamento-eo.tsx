@@ -129,6 +129,7 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
 
   const [dragOp, setDragOp] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const [selectedPreCond, setSelectedPreCond] = useState<"pre_cond_1" | "pre_cond_2">("pre_cond_1");
 
   const assignOpToPalete = useCallback(async (opId: string, paleteId: string) => {
     const opRow = ops.find((o) => o.id === opId);
@@ -184,7 +185,7 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     toast.success("Palete limpa");
   }, [opsPorPalete]);
 
-  const fecharCiclo = useCallback(async () => {
+  const fecharCiclo = useCallback(async (preCond: "pre_cond_1" | "pre_cond_2") => {
     const paletesComConteudo = paletesPlaneamento.filter((p) => (opsPorPalete.get(p.id) ?? []).length > 0);
     if (paletesComConteudo.length === 0) { toast.error("Sem paletes preenchidas"); return; }
     if (!confirm(`Fechar ciclo com ${paletesComConteudo.length} palete${paletesComConteudo.length === 1 ? "" : "s"}? As OPs ficarão em aguarda EO.`)) return;
@@ -199,7 +200,7 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     const { data: cicloData, error: eCiclo } = await supabase
       .from("equipamento_ciclo")
       .insert({
-        zona_id: "pre_cond_1",
+        zona_id: preCond,
         estado: "em_ciclo",
         conteudo: conteudoTxt,
         paletes: paletesComConteudo.length,
@@ -219,7 +220,7 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     await supabase.from("paletes_eo").update({ estado: "em_pre_cond", ciclo_id: cicloData.id, fechada_em: new Date().toISOString() }).in("id", idsPaletes);
 
     // 3) O seed effect cria novas paletes de planeamento automaticamente quando este ciclo é fechado
-    toast.success("Ciclo fechado e enviado para esterilização");
+    toast.success(`Ciclo fechado → ${ZONA_CICLO_LABEL[preCond]}`);
   }, [paletesPlaneamento, opsPorPalete]);
 
   return (
@@ -233,10 +234,18 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
         <div className="ml-auto flex items-center gap-2 text-[11px]">
           <span className="rounded bg-sky-50 px-2 py-1 font-extrabold text-sky-700">Termo: {DIMENSOES.termo}</span>
           <span className="rounded bg-violet-50 px-2 py-1 font-extrabold text-violet-700">Manual: {DIMENSOES.manual}</span>
+          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1">
+            <span className="font-extrabold text-slate-600">Pré-cond:</span>
+            {(["pre_cond_1", "pre_cond_2"] as const).map((pc) => (
+              <button key={pc} onClick={() => setSelectedPreCond(pc)}
+                className={cn("rounded px-2 py-0.5 font-extrabold transition", selectedPreCond === pc ? "bg-amber-500 text-white" : "text-slate-500 hover:bg-slate-200")}
+              >{pc === "pre_cond_1" ? "1" : "2"}</button>
+            ))}
+          </div>
           <button
-            onClick={fecharCiclo}
+            onClick={() => fecharCiclo(selectedPreCond)}
             className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-700"
-          >🔒 Fechar ciclo → Esterilizador</button>
+          >🔒 Fechar → {ZONA_CICLO_LABEL[selectedPreCond]}</button>
         </div>
       </div>
 

@@ -18,6 +18,7 @@ import type {
   ResultadoRotulagem,
   ResultadoCq,
   CqChecklistItem,
+  AuditLog,
 } from "@/lib/types";
 
 interface Props {
@@ -56,6 +57,25 @@ export function QualidadeTvPanel({ ops: initialOps, pedidos: initialPedidos, ini
   const { items: rotulagem } = useRealtimeTable<RotulagemInspecao>("rotulagem_inspecoes", initialRotulagem, { orderBy: "created_at", ascending: false });
   const { items: cq } = useRealtimeTable<CqInspecao>("cq_inspecoes", initialCq, { orderBy: "created_at", ascending: false });
   const { items: ncs } = useRealtimeTable<NaoConformidade>("nao_conformidades", initialNcs, { orderBy: "created_at", ascending: false });
+
+  // Pedidos de manutenção recentes (audit_log com acao=manutencao_solicitada, últimas 24h)
+  const [manutencaoPedidos, setManutencaoPedidos] = useState<AuditLog[]>([]);
+  useEffect(() => {
+    const desde = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const fetch = () => supabase
+      .from("audit_log")
+      .select("*")
+      .eq("acao", "manutencao_solicitada")
+      .gte("created_at", desde)
+      .order("created_at", { ascending: false })
+      .limit(20)
+      .then(({ data }) => { if (data) setManutencaoPedidos(data as AuditLog[]); });
+    fetch();
+    const ch = supabase.channel("audit-manutencao-q")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "audit_log" }, () => fetch())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, []);
 
   const [semanaOffset, setSemanaOffset] = useState(0);
   const [rotInspecao, setRotInspecao] = useState<OrdemProducao | null>(null);
@@ -164,7 +184,7 @@ export function QualidadeTvPanel({ ops: initialOps, pedidos: initialPedidos, ini
       <div className="grid grid-cols-5 gap-3 border-b border-slate-200 bg-white px-6 py-3">
         <KpiCard label="Pedidos na semana" value={String(semanaTotal)} color="slate" />
         <KpiCard label="Rotulagem pendente" value={String(rotulagemPendente.length)} color={rotulagemPendente.length > 0 ? "amber" : "emerald"} />
-        <KpiCard label="CQ solicitado" value={String(cqSolicitado.length)} color={cqSolicitado.length > 0 ? "sky" : "emerald"} />
+        <KpiCard label="CQ/Manutenção solicitado" value={String(cqSolicitado.length + manutencaoPedidos.length)} color={(cqSolicitado.length + manutencaoPedidos.length) > 0 ? "sky" : "emerald"} />
         <KpiCard label="NC abertas" value={String(kpis.ncsAbertas)} color={kpis.ncsAbertas > 0 ? "red" : "emerald"} sub={kpis.ncsCriticas > 0 ? `${kpis.ncsCriticas} críticas` : undefined} />
         <KpiCard label="Aprovação CQ" value={`${kpis.cqPct.toFixed(0)}%`} color={kpis.cqPct >= 95 ? "emerald" : kpis.cqPct >= 80 ? "amber" : "red"} />
       </div>
@@ -182,10 +202,10 @@ export function QualidadeTvPanel({ ops: initialOps, pedidos: initialPedidos, ini
           <HistoricoRotulagem lista={rotulagem} />
         </Section>
 
-        {/* CQ */}
-        <Section title="🔍 CQ solicitado" badge={`${cqSolicitado.length}`} accent="sky">
+        {/* CQ / Manutenção */}
+        <Section title="🔍 CQ / Manutenção solicitado" badge={`${cqSolicitado.length + manutencaoPedidos.length}`} accent="sky">
           <div className="flex-1 overflow-y-auto p-2">
-            {cqSolicitado.length === 0 ? (
+            {cqSolicitado.length === 0 && manutencaoPedidos.length === 0 ? (
               <p className="py-12 text-center text-sm font-bold text-slate-400">Sem pedidos pendentes 🎉</p>
             ) : (
               <ul className="space-y-2">
@@ -193,13 +213,28 @@ export function QualidadeTvPanel({ ops: initialOps, pedidos: initialPedidos, ini
                   <li key={inspecao.id}>
                     <button onClick={() => setCqInspecao({ op, pendente: inspecao })} className="flex w-full flex-col items-start gap-1 rounded-lg border border-sky-200 bg-sky-50 p-3 text-left shadow-sm hover:border-sky-400 hover:bg-sky-100">
                       <div className="flex w-full items-center gap-1.5">
-                        <span className="rounded bg-sky-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">SOLICITADO</span>
+                        <span className="rounded bg-sky-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">CQ SOLICITADO</span>
                         <span className="font-mono text-[10px] font-bold text-slate-600">{op.numero ?? "—"}</span>
                         <span className="ml-auto text-[10px] font-bold text-slate-500" suppressHydrationWarning>{new Date(inspecao.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
                       </div>
                       <span className="text-sm font-black text-slate-900">{op.produto_nome}</span>
-                      <span className="text-xs font-bold text-slate-500">{op.cliente ?? "—"} · {ZONA_LABEL[op.zona_id] ?? op.zona_id} · {inspecao.pessoa_nome ?? "—"}</span>
+                      <span className="text-xs font-bold text-slate-500">{ZONA_LABEL[op.zona_id] ?? op.zona_id} · {inspecao.pessoa_nome ?? "—"}</span>
+                      {op.lote && <span className="text-[10px] font-bold text-slate-400">Lote: {op.lote}</span>}
                     </button>
+                  </li>
+                ))}
+                {manutencaoPedidos.map((log) => (
+                  <li key={log.id}>
+                    <div className="flex flex-col gap-1 rounded-lg border border-orange-200 bg-orange-50 p-3 shadow-sm">
+                      <div className="flex w-full items-center gap-1.5">
+                        <span className="rounded bg-orange-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">🔧 MANUTENÇÃO</span>
+                        <span className="ml-auto text-[10px] font-bold text-slate-500" suppressHydrationWarning>{new Date(log.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
+                      </div>
+                      <span className="text-sm font-black text-slate-900">{(log.detalhes as Record<string, string> | null)?.produto ?? "—"}</span>
+                      <span className="text-xs font-bold text-slate-500">
+                        {log.zona_id ? (ZONA_LABEL[log.zona_id as keyof typeof ZONA_LABEL] ?? log.zona_id) : "—"} · {log.pessoa_nome ?? "—"}
+                      </span>
+                    </div>
                   </li>
                 ))}
               </ul>

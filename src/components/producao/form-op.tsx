@@ -55,8 +55,8 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
       if ((e.key === "ArrowLeft" || e.key === "ArrowUp") && onPrev) { e.preventDefault(); onPrev(); }
       if ((e.key === "ArrowRight" || e.key === "ArrowDown") && onNext) { e.preventDefault(); onNext(); }
     }
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
   }, [open, onPrev, onNext]);
 
   // Autocomplete de produtos

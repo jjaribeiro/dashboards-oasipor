@@ -566,6 +566,14 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
         {/* Barra KPI do dia/turno */}
         {!isCiclo && <TopKPIBar ops={opsFiltradas} />}
 
+        {/* Aviso: sem equipa associada */}
+        {!isCiclo && equipa.length === 0 && (
+          <div className="flex items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-800">
+            <span className="text-lg">⚠️</span>
+            <span>Sem equipa associada a esta zona hoje. Configure a escala no <a href="/producao/planeamento?tab=equipas" className="underline hover:text-amber-900">Planeamento → Equipas</a>.</span>
+          </div>
+        )}
+
         {isCiclo ? (
           <CicloPanel ciclo={ciclo} onOpen={(c) => setCicloForm({ open: true, item: c })} />
         ) : (

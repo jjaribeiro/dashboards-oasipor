@@ -383,6 +383,24 @@ export function ImportOpsDialog({ onClose, onImported }: ImportPedidosDialogProp
       atualizados++;
     }
 
+    // Guardar produtos na memória de produtos (upsert por referencia)
+    const produtosParaSalvar = validos
+      .filter((p) => p.produto_codigo)
+      .map((p) => ({
+        referencia: p.produto_codigo!,
+        descricao: p.produto_nome,
+        tipo: null as string | null,
+        tipo_caixa: null as string | null,
+        qtd_por_caixa: p.quantidade_por_caixa,
+      }));
+    if (produtosParaSalvar.length > 0) {
+      // Upsert: actualiza descricao e qtd_por_caixa se referencia já existe; não sobrescreve tipo/tipo_caixa
+      await supabase.from("produtos").upsert(
+        produtosParaSalvar,
+        { onConflict: "referencia", ignoreDuplicates: false }
+      );
+    }
+
     setImporting(false);
 
     if (insertError) { toast.error(`Erro a importar novos: ${insertError}`); return; }
@@ -393,6 +411,7 @@ export function ImportOpsDialog({ onClose, onImported }: ImportPedidosDialogProp
     if (atualizados > 0) partes.push(`${atualizados} atualizado${atualizados > 1 ? "s" : ""}`);
     if (iguais > 0) partes.push(`${iguais} sem alterações`);
     if (partes.length === 0) partes.push("Nada a importar");
+    if (produtosParaSalvar.length > 0) partes.push(`${produtosParaSalvar.length} produtos gravados`);
     toast.success(partes.join(" · "));
     onImported?.();
     onClose();
