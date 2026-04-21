@@ -289,9 +289,9 @@ function OPRow({ op, principal, onClick, showLinha, draggable = true }: { op: Or
       </p>
 
       {/* Linha 3: OP + cliente + datas */}
-      <div className="mt-0.5 flex items-center gap-2 text-sm font-bold text-slate-400">
+      <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden text-sm font-bold text-slate-400">
         {infoSegments.length > 0 && (
-          <span className="shrink-0 text-slate-500">{infoSegments.join(" · ")}</span>
+          <span className="truncate text-slate-500">{infoSegments.join(" · ")}</span>
         )}
         {(op.inicio_previsto || op.fim_previsto) && infoSegments.length > 0 && (
           <span className="text-slate-200">|</span>

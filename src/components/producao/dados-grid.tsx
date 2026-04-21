@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
@@ -8,29 +8,69 @@ import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 import type { Funcionario, Produto } from "@/lib/types";
 
+const ADMIN_EMAIL = "joaoribeiro@oasipor.pt";
+
+type Tab = "funcionarios" | "produtos" | "sugestoes";
+
 interface Props {
   initialFuncionarios: Funcionario[];
   initialProdutos?: Produto[];
 }
 
-export function DadosGrid({ initialFuncionarios }: Props) {
+export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) {
   const { items: funcionarios, refetch: refetchFunc } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
+  const { items: produtos, refetch: refetchProd } = useRealtimeTable<Produto>("produtos", initialProdutos, { orderBy: "referencia" });
+  const [tab, setTab] = useState<Tab>("funcionarios");
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user?.email === ADMIN_EMAIL) setIsAdmin(true);
+    });
+  }, []);
+
+  const tabs: { id: Tab; label: string; count?: number }[] = [
+    { id: "funcionarios", label: "Funcionários", count: funcionarios.length },
+    { id: "produtos", label: "Produtos", count: produtos.length },
+    ...(isAdmin ? [{ id: "sugestoes" as Tab, label: "Sugestões" }] : []),
+  ];
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-6">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <a href="/" className="flex items-center gap-2 text-slate-500 transition-colors hover:text-slate-900" title="Voltar ao hub">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-          </a>
-          <h1 className="text-2xl font-extrabold text-slate-900">Funcionários</h1>
-          <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{funcionarios.length}</span>
-        </div>
+    <div className="mx-auto flex h-screen max-w-7xl flex-col gap-3 px-6 py-6">
+      <div className="mb-2 flex items-center gap-4">
+        <a href="/" className="flex items-center gap-2 text-slate-500 transition-colors hover:text-slate-900" title="Voltar ao hub">
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+        </a>
+        <h1 className="text-2xl font-extrabold text-slate-900">Dados</h1>
       </div>
 
-      <GridFuncionarios items={funcionarios} refetch={refetchFunc} />
+      <div className="flex gap-1 border-b border-slate-200 pb-0">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-t px-4 py-2 text-sm font-bold transition-colors",
+              tab === t.id
+                ? "border-b-2 border-blue-600 text-blue-700"
+                : "text-slate-500 hover:text-slate-800"
+            )}
+          >
+            {t.label}
+            {t.count !== undefined && (
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-extrabold text-slate-600">{t.count}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        {tab === "funcionarios" && <GridFuncionarios items={funcionarios} refetch={refetchFunc} />}
+        {tab === "produtos" && <TabelaProdutos items={produtos} refetch={refetchProd} />}
+        {tab === "sugestoes" && isAdmin && <TabelaSugestoes />}
+      </div>
     </div>
   );
 }
@@ -38,6 +78,8 @@ export function DadosGrid({ initialFuncionarios }: Props) {
 /* ============================================================
    Grid Funcionários — cards compactos com edição rápida
    ============================================================ */
+const TIPO_OPTIONS = ["mascaras", "toucas", "campos", "laminados", "stock", "outros"] as const;
+
 const PRESET_COLORS = [
   "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e",
   "#10b981", "#14b8a6", "#06b6d4", "#0ea5e9", "#3b82f6", "#6366f1",
@@ -71,7 +113,7 @@ const EMPTY_FUNC: FuncData = { nome: "", iniciais: "", cor: "#64748b", ativo: tr
 
 function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: () => void }) {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null); // null = novo
+  const [editId, setEditId] = useState<string | null>(null);
   const [data, setData] = useState<FuncData>(EMPTY_FUNC);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
@@ -152,7 +194,7 @@ function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: (
   const iniciaisPreview = (data.iniciais || data.nome.split(/\s+/).map((p) => p[0]).slice(0, 2).join("")).toUpperCase() || "?";
 
   return (
-    <div className="space-y-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {/* Toolbar */}
       <div className="flex items-center gap-2">
         <input
@@ -171,41 +213,92 @@ function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: (
         >+ Novo funcionário</button>
       </div>
 
-      {/* Grid de cards */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-        {filtered.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => openEdit(f)}
-            className={cn(
-              "group relative flex flex-col items-center gap-2 rounded-xl border bg-white p-3 text-center shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md",
-              f.ativo ? "border-slate-200" : "border-slate-200 opacity-60"
+      {/* Tabela */}
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-50">
+            <tr className="border-b border-slate-200 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+              <th className="px-4 py-3">Nome</th>
+              <th className="px-4 py-3 w-20">Iniciais</th>
+              <th className="px-4 py-3 w-36">Departamento</th>
+              <th className="px-4 py-3 w-36">Função</th>
+              <th className="px-4 py-3 w-24">PIN</th>
+              <th className="px-4 py-3 w-48">Acessos</th>
+              <th className="px-4 py-3 w-20 text-center">Estado</th>
+              <th className="px-4 py-3 w-20 text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((f) => (
+              <tr
+                key={f.id}
+                className={cn("border-b border-slate-100 hover:bg-slate-50", !f.ativo && "opacity-50")}
+              >
+                <td className="px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-black text-white"
+                      style={{ backgroundColor: f.cor ?? "#64748b" }}
+                    >
+                      {f.iniciais ?? f.nome.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="font-extrabold text-slate-900">{f.nome}</p>
+                      {f.email && <p className="text-[11px] text-slate-400">{f.email}</p>}
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-2.5 font-mono font-extrabold text-slate-700">{f.iniciais ?? "—"}</td>
+                <td className="px-4 py-2.5 text-slate-600">{f.departamento ?? <span className="text-slate-300">—</span>}</td>
+                <td className="px-4 py-2.5 text-slate-600">{f.funcao ?? <span className="text-slate-300">—</span>}</td>
+                <td className="px-4 py-2.5">
+                  {f.pin
+                    ? <span className="font-mono font-bold text-slate-700">{"•".repeat(f.pin.length)}</span>
+                    : <span className="text-[11px] font-bold text-amber-600">Sem PIN</span>
+                  }
+                </td>
+                <td className="px-4 py-2.5">
+                  <div className="flex flex-wrap gap-0.5 max-w-[160px]">
+                    {(f.acessos ?? []).slice(0, 4).map((a) => (
+                      <span key={a} className="rounded bg-slate-800 px-1.5 py-0.5 text-[8px] font-extrabold uppercase text-white">{a}</span>
+                    ))}
+                    {(f.acessos ?? []).length > 4 && (
+                      <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[8px] font-extrabold text-slate-600" title={(f.acessos ?? []).slice(4).join(", ")}>+{(f.acessos ?? []).length - 4}</span>
+                    )}
+                    {(f.acessos ?? []).length === 0 && <span className="text-slate-300 text-[11px]">—</span>}
+                  </div>
+                </td>
+                <td className="px-4 py-2.5 text-center">
+                  <span className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase",
+                    f.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                  )}>
+                    {f.ativo ? "Ativo" : "Inativo"}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <button
+                    onClick={() => openEdit(f)}
+                    className="rounded-md bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200"
+                  >Editar</button>
+                </td>
+              </tr>
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-4 py-10 text-center text-sm font-bold text-slate-400">
+                  {search ? `Nenhum funcionário corresponde a "${search}"` : "Sem funcionários"}
+                </td>
+              </tr>
             )}
-          >
-            <div
-              className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-black text-white shadow-inner ring-2 ring-white"
-              style={{ backgroundColor: f.cor ?? "#64748b" }}
-            >
-              {f.iniciais ?? f.nome.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-            </div>
-            <div>
-              <span className="line-clamp-2 text-xs font-extrabold leading-tight text-slate-900">{f.nome}</span>
-              {(f.funcao || f.departamento) && (
-                <p className="mt-0.5 line-clamp-1 text-[10px] font-bold text-slate-500">
-                  {[f.funcao, f.departamento].filter(Boolean).join(" · ")}
-                </p>
-              )}
-            </div>
-            {!f.ativo && (
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-slate-500">inativo</span>
-            )}
-          </button>
-        ))}
-        {filtered.length === 0 && (
-          <div className="col-span-full rounded-xl border border-dashed border-slate-200 bg-white py-12 text-center text-sm font-bold text-slate-400">
-            {search ? `Nenhum funcionário corresponde a "${search}"` : "Sem funcionários"}
-          </div>
-        )}
+          </tbody>
+        </table>
+        <button
+          onClick={openNew}
+          className="flex w-full items-center justify-center gap-2 border-t border-dashed border-slate-200 py-3 text-sm font-bold text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600"
+        >
+          + Novo Funcionário
+        </button>
       </div>
 
       {/* Modal */}
@@ -803,6 +896,64 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
             + Novo Produto
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Tabela Sugestões — apenas admin
+   ============================================================ */
+type Sugestao = { id: string; texto: string; pagina: string | null; nome_pessoa: string | null; criado_em: string };
+
+function TabelaSugestoes() {
+  const [items, setItems] = useState<Sugestao[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.from("sugestoes").select("*").order("criado_em", { ascending: false }).then(({ data }) => {
+      setItems((data ?? []) as Sugestao[]);
+      setLoading(false);
+    });
+    const ch = supabase.channel("sugestoes_admin")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "sugestoes" }, (payload) => {
+        setItems((prev) => [payload.new as Sugestao, ...prev]);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, []);
+
+  async function apagar(id: string) {
+    if (!confirm("Apagar esta sugestão?")) return;
+    await supabase.from("sugestoes").delete().eq("id", id);
+    setItems((prev) => prev.filter((s) => s.id !== id));
+  }
+
+  if (loading) return <p className="py-10 text-center text-sm text-slate-400">A carregar…</p>;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white">
+      <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-3">
+        <h2 className="font-extrabold text-slate-900">Sugestões de Melhoria</h2>
+        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{items.length}</span>
+      </div>
+      {items.length === 0 && (
+        <p className="py-10 text-center text-sm text-slate-400">Ainda não há sugestões.</p>
+      )}
+      <div className="divide-y divide-slate-100">
+        {items.map((s) => (
+          <div key={s.id} className="flex items-start gap-4 px-5 py-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-900">{s.texto}</p>
+              <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-slate-400">
+                {s.nome_pessoa && <span className="font-semibold text-slate-600">👤 {s.nome_pessoa}</span>}
+                {s.pagina && <span>📄 {s.pagina}</span>}
+                <span>{new Date(s.criado_em).toLocaleString("pt-PT")}</span>
+              </div>
+            </div>
+            <button onClick={() => apagar(s.id)} className="shrink-0 rounded-md px-2 py-1 text-xs font-bold text-slate-400 hover:bg-red-50 hover:text-red-600">✕</button>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -5,7 +5,20 @@ import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { cn } from "@/lib/utils";
-import type { OrdemProducao, PaleteEO, Produto, TipoCaixa } from "@/lib/types";
+import type { EquipamentoCiclo, OrdemProducao, PaleteEO, Produto, TipoCaixa } from "@/lib/types";
+
+const ZONA_CICLO_LABEL: Record<string, string> = {
+  pre_cond_1: "Pré-Cond. 1", pre_cond_2: "Pré-Cond. 2",
+  esterilizador: "Esterilizador",
+  arejamento_1: "Arejamento 1", arejamento_2: "Arejamento 2",
+};
+const ZONA_CICLO_COR: Record<string, string> = {
+  pre_cond_1: "bg-amber-100 text-amber-800 border-amber-300",
+  pre_cond_2: "bg-amber-100 text-amber-800 border-amber-300",
+  esterilizador: "bg-red-100 text-red-800 border-red-300",
+  arejamento_1: "bg-teal-100 text-teal-800 border-teal-300",
+  arejamento_2: "bg-teal-100 text-teal-800 border-teal-300",
+};
 
 const CAPACIDADE: Record<TipoCaixa, number> = { termo: 25, manual: 20 };
 const DIMENSOES: Record<TipoCaixa, string> = {
@@ -36,14 +49,18 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     return m;
   }, [produtos]);
 
-  // OPs disponíveis = concluídas no embalamento e sem palete atribuída, com origem SL2 (termo/manual)
+  // OPs disponíveis = concluídas no embalamento e sem palete atribuída
+  // Inclui qualquer tipo_linha — tipo_caixa inferido do produto ou do tipo_linha
   const disponiveis = useMemo(() => {
     return ops
       .filter((o) => o.estado === "concluida" && o.zona_id === "sl2_embalamento" && !o.palete_eo_id)
-      .filter((o) => o.tipo_linha === "termoformadora" || o.tipo_linha === "manual")
       .map((o) => {
         const prod = (o.produto_id && produtoPorId.get(o.produto_id)) || (o.produto_codigo && produtoPorCodigo.get(o.produto_codigo)) || null;
-        const tipoCaixa: TipoCaixa | null = prod?.tipo_caixa ?? (o.tipo_linha === "termoformadora" ? "termo" : o.tipo_linha === "manual" ? "manual" : null);
+        const tipoCaixa: TipoCaixa | null = prod?.tipo_caixa ?? (
+          o.tipo_linha === "termoformadora" ? "termo"
+          : o.tipo_linha === "manual" ? "manual"
+          : null
+        );
         const qtdCaixa = prod?.qtd_por_caixa ?? 0;
         const numCaixas = o.num_caixas ?? (qtdCaixa > 0 ? Math.ceil((o.quantidade_atual || 0) / qtdCaixa) : 0);
         return {
@@ -92,8 +109,27 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     return arr.slice(0, NUM_PALETES);
   }, [paletes]);
 
+  // Ciclos em progresso (pré-cond, esterilizador, arejamento)
+  const [ciclosAtivos, setCiclosAtivos] = useState<EquipamentoCiclo[]>([]);
+  useEffect(() => {
+    supabase
+      .from("equipamento_ciclo")
+      .select("*")
+      .in("estado", ["em_ciclo"])
+      .order("inicio", { ascending: false })
+      .then(({ data }) => { if (data) setCiclosAtivos(data as EquipamentoCiclo[]); });
+    const ch = supabase.channel("ciclos-eo")
+      .on("postgres_changes", { event: "*", schema: "public", table: "equipamento_ciclo" }, () => {
+        supabase.from("equipamento_ciclo").select("*").in("estado", ["em_ciclo"]).order("inicio", { ascending: false })
+          .then(({ data }) => { if (data) setCiclosAtivos(data as EquipamentoCiclo[]); });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, []);
+
   const [dragOp, setDragOp] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const [selectedPreCond, setSelectedPreCond] = useState<"pre_cond_1" | "pre_cond_2">("pre_cond_1");
 
   const assignOpToPalete = useCallback(async (opId: string, paleteId: string) => {
     const opRow = ops.find((o) => o.id === opId);
@@ -149,7 +185,7 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     toast.success("Palete limpa");
   }, [opsPorPalete]);
 
-  const fecharCiclo = useCallback(async () => {
+  const fecharCiclo = useCallback(async (preCond: "pre_cond_1" | "pre_cond_2") => {
     const paletesComConteudo = paletesPlaneamento.filter((p) => (opsPorPalete.get(p.id) ?? []).length > 0);
     if (paletesComConteudo.length === 0) { toast.error("Sem paletes preenchidas"); return; }
     if (!confirm(`Fechar ciclo com ${paletesComConteudo.length} palete${paletesComConteudo.length === 1 ? "" : "s"}? As OPs ficarão em aguarda EO.`)) return;
@@ -164,7 +200,7 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     const { data: cicloData, error: eCiclo } = await supabase
       .from("equipamento_ciclo")
       .insert({
-        zona_id: "pre_cond_1",
+        zona_id: preCond,
         estado: "em_ciclo",
         conteudo: conteudoTxt,
         paletes: paletesComConteudo.length,
@@ -183,12 +219,8 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     const idsPaletes = paletesComConteudo.map((p) => p.id);
     await supabase.from("paletes_eo").update({ estado: "em_pre_cond", ciclo_id: cicloData.id, fechada_em: new Date().toISOString() }).in("id", idsPaletes);
 
-    // 3) Recriar novas paletes em estado planeamento (8)
-    const novas: { numero: number; estado: string }[] = [];
-    for (let i = 1; i <= NUM_PALETES; i++) novas.push({ numero: i, estado: "planeamento" });
-    await supabase.from("paletes_eo").insert(novas);
-
-    toast.success("Ciclo fechado e enviado para esterilização");
+    // 3) O seed effect cria novas paletes de planeamento automaticamente quando este ciclo é fechado
+    toast.success(`Ciclo fechado → ${ZONA_CICLO_LABEL[preCond]}`);
   }, [paletesPlaneamento, opsPorPalete]);
 
   return (
@@ -202,12 +234,37 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
         <div className="ml-auto flex items-center gap-2 text-[11px]">
           <span className="rounded bg-sky-50 px-2 py-1 font-extrabold text-sky-700">Termo: {DIMENSOES.termo}</span>
           <span className="rounded bg-violet-50 px-2 py-1 font-extrabold text-violet-700">Manual: {DIMENSOES.manual}</span>
+          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1">
+            <span className="font-extrabold text-slate-600">Pré-cond:</span>
+            {(["pre_cond_1", "pre_cond_2"] as const).map((pc) => (
+              <button key={pc} onClick={() => setSelectedPreCond(pc)}
+                className={cn("rounded px-2 py-0.5 font-extrabold transition", selectedPreCond === pc ? "bg-amber-500 text-white" : "text-slate-500 hover:bg-slate-200")}
+              >{pc === "pre_cond_1" ? "1" : "2"}</button>
+            ))}
+          </div>
           <button
-            onClick={fecharCiclo}
+            onClick={() => fecharCiclo(selectedPreCond)}
             className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-700"
-          >🔒 Fechar ciclo → Esterilizador</button>
+          >🔒 Fechar → {ZONA_CICLO_LABEL[selectedPreCond]}</button>
         </div>
       </div>
+
+      {/* Ciclos em curso */}
+      {ciclosAtivos.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {ciclosAtivos.map((c) => (
+            <div key={c.id} className={cn("flex items-center gap-2 rounded-lg border px-3 py-1.5", ZONA_CICLO_COR[c.zona_id] ?? "bg-slate-100 text-slate-700 border-slate-300")}>
+              <span className="text-[10px] font-extrabold uppercase tracking-wide">{ZONA_CICLO_LABEL[c.zona_id] ?? c.zona_id}</span>
+              {c.paletes !== null && <span className="rounded bg-white/60 px-1.5 py-0.5 text-[10px] font-black">{c.paletes} paletes</span>}
+              {c.inicio && (
+                <span className="text-[10px] font-bold opacity-70" suppressHydrationWarning>
+                  desde {new Date(c.inicio).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid min-h-0 flex-1 grid-cols-12 gap-3">
         {/* Produtos disponíveis */}

@@ -176,8 +176,9 @@ export function computePrioridadeEfetiva<
   for (const arr of grupos.values()) {
     arr.sort((a, b) => a.id.localeCompare(b.id));
     arr.forEach((p, i) => {
+      if (p.prioridade === "por_definir") { out.set(p.id, "por_definir"); return; }
       const baseIdx = rank(p.prioridade);
-      const idx = Math.min(ordem.length - 1, baseIdx + i);
+      const idx = Math.min(3, baseIdx + i); // cap at "baixa" (idx 3), never cascade to "por_definir"
       out.set(p.id, ordem[idx]);
     });
   }

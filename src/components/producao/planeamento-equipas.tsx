@@ -1,12 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { cn } from "@/lib/utils";
 import { ZONA_LABEL, AREA_COR, AREA_LABEL } from "@/lib/constants";
-import type { Funcionario, ZonaProducao } from "@/lib/types";
+import type { EscalaFuncionario, Funcionario, ZonaId, ZonaProducao } from "@/lib/types";
+
+/** Segunda-feira da semana que contém a data passada (ISO: segunda=1) */
+function getMondayOf(d: Date): Date {
+  const m = new Date(d);
+  const day = m.getDay() || 7;
+  m.setDate(m.getDate() - (day - 1));
+  m.setHours(0, 0, 0, 0);
+  return m;
+}
+
+function toYYYYMMDD(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function fmtSemana(monday: Date): string {
+  const sexta = new Date(monday);
+  sexta.setDate(sexta.getDate() + 4);
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
+  return `${monday.toLocaleDateString("pt-PT", opts)} – ${sexta.toLocaleDateString("pt-PT", opts)}`;
+}
 
 interface Props {
   zonas: ZonaProducao[];
@@ -16,6 +36,40 @@ interface Props {
 export function EquipasTab({ zonas, initialFuncionarios }: Props) {
   const { items: funcionarios, setItems: setFuncionarios } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
   const [search, setSearch] = useState("");
+
+  // Week navigation: 0 = current week, +1 = next week, -1 = last week, etc.
+  const [weekOffset, setWeekOffset] = useState(0);
+  const currentMonday = useMemo(() => getMondayOf(new Date()), []);
+  const viewMonday = useMemo(() => {
+    const m = new Date(currentMonday);
+    m.setDate(m.getDate() + weekOffset * 7);
+    return m;
+  }, [currentMonday, weekOffset]);
+  const isCurrentWeek = weekOffset === 0;
+
+  // Escala data for non-current weeks
+  const [escala, setEscala] = useState<EscalaFuncionario[]>([]);
+  const [escalaLoading, setEscalaLoading] = useState(false);
+
+  const loadEscala = useCallback(async (monday: Date) => {
+    setEscalaLoading(true);
+    const dataStr = toYYYYMMDD(monday);
+    const sexta = new Date(monday);
+    sexta.setDate(sexta.getDate() + 4);
+    const { data, error } = await supabase
+      .from("escala_funcionario")
+      .select("*")
+      .gte("data", dataStr)
+      .lte("data", toYYYYMMDD(sexta));
+    setEscalaLoading(false);
+    if (error) toast.error("Erro ao carregar escala");
+    else setEscala((data ?? []) as EscalaFuncionario[]);
+  }, []);
+
+  useEffect(() => {
+    if (!isCurrentWeek) loadEscala(viewMonday);
+    else setEscala([]);
+  }, [isCurrentWeek, viewMonday, loadEscala]);
 
   function patchFuncionario(id: string, patch: Partial<Funcionario>) {
     setFuncionarios((prev) => prev.map((f) => f.id === id ? { ...f, ...patch } : f));
@@ -35,61 +89,161 @@ export function EquipasTab({ zonas, initialFuncionarios }: Props) {
   const areasVisiveis = ordemArea.filter((a) => porArea[a]?.length);
 
   const ativos = funcionarios.filter((f) => f.ativo);
-  const semZona = ativos.filter((f) => !f.zona_atual);
+
+  // Escala (non-current week): add or remove a funcionario↔zona assignment for the viewed week's Monday
+  async function moveEscala(funcId: string, zonaId: string | null, removeZonaId?: string) {
+    if (zonaId) {
+      // upsert: one row per (funcionario_id, data, zona_id)
+      const dataStr = toYYYYMMDD(viewMonday);
+      const exists = escala.some((e) => e.funcionario_id === funcId && e.zona_id === zonaId && e.data === dataStr);
+      if (exists) return;
+      const { data: inserted, error } = await supabase
+        .from("escala_funcionario")
+        .insert({ funcionario_id: funcId, data: dataStr, zona_id: zonaId })
+        .select()
+        .single();
+      if (error) { toast.error("Erro ao guardar escala"); return; }
+      setEscala((prev) => [...prev, inserted as EscalaFuncionario]);
+    } else if (removeZonaId) {
+      const dataStr = toYYYYMMDD(viewMonday);
+      const row = escala.find((e) => e.funcionario_id === funcId && e.zona_id === removeZonaId && e.data === dataStr);
+      if (!row) return;
+      await supabase.from("escala_funcionario").delete().eq("id", row.id);
+      setEscala((prev) => prev.filter((e) => e.id !== row.id));
+    } else {
+      // clear all for this func in this week
+      const dataStr = toYYYYMMDD(viewMonday);
+      const toDelete = escala.filter((e) => e.funcionario_id === funcId && e.data === dataStr);
+      await supabase.from("escala_funcionario").delete().in("id", toDelete.map((e) => e.id));
+      setEscala((prev) => prev.filter((e) => !(e.funcionario_id === funcId && e.data === dataStr)));
+    }
+  }
+
+  // novaZona=null + removerZona=undefined → limpar tudo (arrasta para sidebar)
+  // novaZona=string → adicionar esta zona ao array
+  // removerZona=string → remover esta zona específica (X dentro de uma zona)
+  async function moveFuncionario(id: string, novaZona: string | null, removerZona?: string) {
+    const f = funcionarios.find((x) => x.id === id);
+    if (!f) return;
+    const zonasAntes = f.zonas_atuais ?? [];
+    let zonasDepois: string[];
+
+    if (removerZona) {
+      zonasDepois = zonasAntes.filter((z) => z !== removerZona);
+    } else if (novaZona) {
+      zonasDepois = (zonasAntes as string[]).includes(novaZona) ? zonasAntes : [...zonasAntes, novaZona as ZonaId];
+    } else {
+      zonasDepois = [];
+    }
+
+    const novaZonaAtual = (zonasDepois[0] ?? null) as Funcionario["zona_atual"];
+    const antes = { zona_atual: f.zona_atual, zonas_atuais: zonasAntes };
+    patchFuncionario(id, { zona_atual: novaZonaAtual, zonas_atuais: zonasDepois as Funcionario["zonas_atuais"] });
+    const { error } = await supabase.from("funcionarios")
+      .update({ zona_atual: novaZonaAtual, zonas_atuais: zonasDepois })
+      .eq("id", id);
+    if (error) {
+      toast.error("Erro a mover");
+      patchFuncionario(id, { zona_atual: antes.zona_atual, zonas_atuais: antes.zonas_atuais as Funcionario["zonas_atuais"] });
+    }
+  }
+
+  // For other weeks: derive "virtual funcionarios" from escala so ZonaRow works unchanged
+  const funcionariosEscala: Funcionario[] = useMemo(() => {
+    if (isCurrentWeek) return funcionarios;
+    const dataStr = toYYYYMMDD(viewMonday);
+    const thisWeek = escala.filter((e) => e.data === dataStr);
+    // Build a map: funcId → zona list for this week
+    const zonesByFunc = new Map<string, ZonaId[]>();
+    for (const e of thisWeek) {
+      const arr = zonesByFunc.get(e.funcionario_id) ?? [];
+      arr.push(e.zona_id as ZonaId);
+      zonesByFunc.set(e.funcionario_id, arr);
+    }
+    return funcionarios.map((f) => {
+      const zones = zonesByFunc.get(f.id) ?? [];
+      return { ...f, zonas_atuais: zones, zona_atual: zones[0] ?? null };
+    });
+  }, [isCurrentWeek, funcionarios, escala, viewMonday]);
+
+  const semZona = ativos.filter((f) => {
+    if (isCurrentWeek) return !f.zona_atual && (!f.zonas_atuais || f.zonas_atuais.length === 0);
+    const fe = funcionariosEscala.find((x) => x.id === f.id);
+    return !fe?.zona_atual && (!fe?.zonas_atuais || fe.zonas_atuais.length === 0);
+  });
   const semZonaFiltered = search.trim()
     ? semZona.filter((f) => f.nome.toLowerCase().includes(search.toLowerCase()))
     : semZona;
 
-  async function moveFuncionario(id: string, novaZona: string | null) {
-    const f = funcionarios.find((x) => x.id === id);
-    if (!f) return;
-    const anterior = f.zona_atual;
-    patchFuncionario(id, { zona_atual: novaZona as Funcionario["zona_atual"] });
-    const { error } = await supabase.from("funcionarios").update({ zona_atual: novaZona }).eq("id", id);
-    if (error) {
-      toast.error("Erro a mover");
-      patchFuncionario(id, { zona_atual: anterior });
-    }
-  }
+  const onMoveAny = isCurrentWeek ? moveFuncionario : moveEscala;
 
   return (
-    <div className="flex h-full gap-3">
-      {/* SIDEBAR esquerda — pool de pessoas */}
-      <SemZonaSidebar
-        funcionarios={semZonaFiltered}
-        total={semZona.length}
-        totalAtivos={ativos.length}
-        search={search}
-        onSearch={setSearch}
-        onDrop={(id) => moveFuncionario(id, null)}
-      />
+    <div className="flex h-full flex-col gap-2">
+      {/* Week navigation bar */}
+      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5">
+        <button
+          onClick={() => setWeekOffset((o) => o - 1)}
+          className="rounded border border-slate-200 px-2 py-0.5 text-sm font-bold text-slate-500 hover:bg-slate-50"
+          title="Semana anterior"
+        >←</button>
+        <span className={cn("flex-1 text-center text-sm font-extrabold", isCurrentWeek ? "text-emerald-700" : "text-slate-700")}>
+          {isCurrentWeek ? "Semana atual · " : ""}{fmtSemana(viewMonday)}
+        </span>
+        <button
+          onClick={() => setWeekOffset((o) => o + 1)}
+          className="rounded border border-slate-200 px-2 py-0.5 text-sm font-bold text-slate-500 hover:bg-slate-50"
+          title="Próxima semana"
+        >→</button>
+        {!isCurrentWeek && (
+          <button
+            onClick={() => setWeekOffset(0)}
+            className="rounded bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600 hover:bg-slate-200"
+          >Hoje</button>
+        )}
+        {!isCurrentWeek && escalaLoading && <span className="text-xs text-slate-400">A carregar…</span>}
+        {!isCurrentWeek && (
+          <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-700">Planeamento</span>
+        )}
+      </div>
 
-      {/* MAIN — áreas em grid */}
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <div className="grid min-h-0 flex-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {areasVisiveis.map((area) => (
-            <section key={area} className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
-              <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-2 py-1">
-                <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR[area])}>{AREA_LABEL[area]}</span>
-                <span className="text-[10px] font-bold text-slate-400">{porArea[area].length} zona{porArea[area].length === 1 ? "" : "s"}</span>
-              </div>
-              <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto">
-                {porArea[area].map((z) => (
-                  <ZonaRow
-                    key={z.id}
-                    zona={z}
-                    funcionarios={funcionarios}
-                    onPatch={patchFuncionario}
-                    onMoveFuncionario={moveFuncionario}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
+      <div className="flex min-h-0 flex-1 gap-3">
+        {/* SIDEBAR esquerda — pool de pessoas */}
+        <SemZonaSidebar
+          funcionarios={semZonaFiltered}
+          total={semZona.length}
+          totalAtivos={ativos.length}
+          search={search}
+          onSearch={setSearch}
+          onDrop={(id) => onMoveAny(id, null)}
+        />
+
+        {/* MAIN — áreas em grid */}
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="grid min-h-0 flex-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {areasVisiveis.map((area) => (
+              <section key={area} className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-2 py-1">
+                  <span className={cn("rounded border px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide", AREA_COR[area])}>{AREA_LABEL[area]}</span>
+                  <span className="text-[10px] font-bold text-slate-400">{porArea[area].length} zona{porArea[area].length === 1 ? "" : "s"}</span>
+                </div>
+                <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto">
+                  {porArea[area].map((z) => (
+                    <ZonaRow
+                      key={z.id}
+                      zona={z}
+                      funcionarios={funcionariosEscala}
+                      onPatch={patchFuncionario}
+                      onMoveFuncionario={onMoveAny}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+
+          {/* COBERTURA strip — todas zonas visíveis com badge contagem */}
+          <CoberturaStrip zonas={zonas} funcionarios={funcionariosEscala.filter((f) => f.ativo)} />
         </div>
-
-        {/* COBERTURA strip — todas zonas visíveis com badge contagem */}
-        <CoberturaStrip zonas={zonas} funcionarios={ativos} />
       </div>
     </div>
   );
@@ -137,8 +291,8 @@ function SemZonaSidebar({
         {funcionarios.length === 0 ? (
           <p className="px-2 py-4 text-center text-[10px] font-bold italic text-slate-400">{search ? "Sem resultados" : "Todos alocados"}</p>
         ) : (
-          <div className="flex flex-wrap gap-1">
-            {funcionarios.map((f) => <FuncChipDraggable key={f.id} f={f} compact />)}
+          <div className="flex flex-col gap-0.5">
+            {funcionarios.map((f) => <FuncChipDraggable key={f.id} f={f} />)}
           </div>
         )}
       </div>
@@ -156,7 +310,7 @@ function ZonaRow({
   zona: ZonaProducao;
   funcionarios: Funcionario[];
   onPatch: (id: string, patch: Partial<Funcionario>) => void;
-  onMoveFuncionario: (id: string, novaZona: string | null) => void;
+  onMoveFuncionario: (id: string, novaZona: string | null, removerZona?: string) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [over, setOver] = useState(false);
@@ -172,7 +326,7 @@ function ZonaRow({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [pickerOpen]);
 
-  const nestaZona = funcionarios.filter((f) => f.zona_atual === zona.id && f.ativo);
+  const nestaZona = funcionarios.filter((f) => f.ativo && (f.zonas_atuais?.includes(zona.id) || f.zona_atual === zona.id));
   const opcoesResp = funcionarios.filter((f) => f.ativo).sort((a, b) => {
     const na = a.zona_atual === zona.id ? 0 : 1;
     const nb = b.zona_atual === zona.id ? 0 : 1;
@@ -233,13 +387,9 @@ function ZonaRow({
           >+</button>
           {pickerOpen && (
             <MultiAddPicker
-              funcionarios={funcionarios.filter((f) => f.ativo && f.zona_atual !== zona.id)}
+              funcionarios={funcionarios.filter((f) => f.ativo && !f.zonas_atuais?.includes(zona.id) && f.zona_atual !== zona.id)}
               onAdd={(ids) => {
-                for (const id of ids) onPatch(id, { zona_atual: zona.id as Funcionario["zona_atual"] });
-                supabase.from("funcionarios").update({ zona_atual: zona.id }).in("id", ids).then(({ error }) => {
-                  if (error) toast.error("Erro a adicionar");
-                  else toast.success(`${ids.length} adicionado${ids.length === 1 ? "" : "s"}`);
-                });
+                for (const id of ids) onMoveFuncionario(id, zona.id);
                 setPickerOpen(false);
               }}
               onClose={() => setPickerOpen(false)}
@@ -248,16 +398,16 @@ function ZonaRow({
         </div>
       </div>
 
-      {/* Linha 2: chips */}
-      <div className="flex flex-wrap gap-0.5 min-h-[20px]">
+      {/* Linha 2: lista vertical */}
+      <div className="flex flex-col gap-0.5 min-h-[20px]">
         {nestaZona.length === 0 && <span className="text-[10px] font-bold italic text-slate-300">arrasta aqui</span>}
         {nestaZona.map((f) => (
           <FuncChipDraggable
             key={f.id}
             f={f}
-            compact
             removable
-            onRemove={() => onMoveFuncionario(f.id, null)}
+            onRemove={() => onMoveFuncionario(f.id, null, zona.id)}
+            multiZona={(f.zonas_atuais?.length ?? 0) > 1}
           />
         ))}
       </div>
@@ -281,7 +431,8 @@ function CoberturaStrip({ zonas, funcionarios }: { zonas: ZonaProducao[]; funcio
   const countPorZona = useMemo(() => {
     const m = new Map<string, number>();
     for (const f of funcionarios) {
-      if (f.zona_atual) m.set(f.zona_atual, (m.get(f.zona_atual) ?? 0) + 1);
+      const zonas = f.zonas_atuais?.length ? f.zonas_atuais : (f.zona_atual ? [f.zona_atual] : []);
+      for (const z of zonas) m.set(z, (m.get(z) ?? 0) + 1);
     }
     return m;
   }, [funcionarios]);
@@ -372,7 +523,7 @@ function MultiAddPicker({
                 on ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-300 bg-white"
               )}>{on && "✓"}</span>
               <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[8px] font-extrabold text-white" style={{ backgroundColor: f.cor ?? "#64748b" }}>{f.iniciais ?? f.nome[0]}</span>
-              <span className="flex-1 truncate text-[10px] font-bold text-slate-800">{f.nome}</span>
+              <span className="flex-1 text-[10px] font-bold text-slate-800">{f.nome}</span>
               {f.zona_atual && (
                 <span className="text-[9px] text-slate-400">({(ZONA_LABEL[f.zona_atual] ?? f.zona_atual).replace(/^SL\d — /, "")})</span>
               )}
@@ -399,30 +550,33 @@ function MultiAddPicker({
   );
 }
 
-/* ========== Chip arrastável ========== */
-function FuncChipDraggable({ f, removable, onRemove, compact }: { f: Funcionario; removable?: boolean; onRemove?: () => void; compact?: boolean }) {
+/* ========== Chip arrastável (lista) ========== */
+function FuncChipDraggable({ f, removable, onRemove, multiZona }: { f: Funcionario; removable?: boolean; onRemove?: () => void; multiZona?: boolean }) {
   return (
-    <span
+    <div
       draggable
       onDragStart={(e) => { e.dataTransfer.setData("text/funcionario-id", f.id); e.dataTransfer.effectAllowed = "move"; }}
-      className={cn(
-        "group inline-flex cursor-grab items-center gap-1 rounded-full border border-slate-200 bg-slate-50 shadow-sm hover:border-slate-300 active:cursor-grabbing",
-        compact ? "py-0 pl-0 pr-1 text-[10px] font-bold text-slate-700" : "py-0.5 pl-0.5 pr-1.5 text-[11px] font-bold text-slate-700"
-      )}
-      title={removable ? `${f.nome} — arrasta ou × para retirar` : f.nome}
+      className="group flex cursor-grab items-center gap-1.5 rounded border border-slate-200 bg-white px-1.5 py-0.5 hover:border-slate-300 hover:bg-slate-50 active:cursor-grabbing"
+      title={removable ? `${f.nome} — arrasta ou × para retirar desta zona` : f.nome}
     >
-      <span className={cn(
-        "inline-flex items-center justify-center rounded-full px-1 text-[8px] font-extrabold text-white",
-        compact ? "h-3.5 min-w-3.5" : "h-4 min-w-4"
-      )} style={{ backgroundColor: f.cor ?? "#64748b" }}>{f.iniciais ?? f.nome[0]}</span>
-      <span className={cn("truncate", compact ? "max-w-[100px]" : "max-w-[140px]")}>{f.nome.split(" ")[0]}</span>
+      <span
+        className="inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[8px] font-extrabold text-white shrink-0"
+        style={{ backgroundColor: f.cor ?? "#64748b" }}
+      >{f.iniciais ?? f.nome[0]}</span>
+      <span className="flex-1 text-[11px] font-bold text-slate-800 leading-tight">{f.nome}</span>
+      {multiZona && (
+        <span
+          className="shrink-0 rounded bg-violet-100 px-1 text-[8px] font-extrabold text-violet-700"
+          title={`Também em: ${(f.zonas_atuais ?? []).slice(1).map((z) => ZONA_LABEL[z] ?? z).join(", ")}`}
+        >+{(f.zonas_atuais?.length ?? 2) - 1} zona{(f.zonas_atuais?.length ?? 2) > 2 ? "s" : ""}</span>
+      )}
       {removable && onRemove && (
         <button
           onClick={(e) => { e.stopPropagation(); onRemove(); }}
-          className="opacity-0 transition-opacity group-hover:opacity-100 text-slate-400 hover:text-red-600"
-          title="Retirar"
+          className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 text-slate-400 hover:text-red-600 text-xs"
+          title="Retirar desta zona"
         >×</button>
       )}
-    </span>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { ZONA_LABEL, ESTADO_OP_LABEL, ESTADO_OP_COR, PRIORIDADE_OP_COR, ZONAS_ORDEM } from "@/lib/constants";
 import { cn, formatShortDateTime } from "@/lib/utils";
 import { FormOP } from "./form-op";
@@ -37,20 +37,23 @@ export function OPsTab({ ops, pedidos, zonas }: { ops: OrdemProducao[]; pedidos:
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return ops.filter((o) => {
-      if (estado && o.estado !== estado) return false;
-      if (zonaFiltro && o.zona_id !== zonaFiltro) return false;
-      if (!q) return true;
-      const ped = o.pedido_id ? pedidoPorId.get(o.pedido_id) : null;
-      return (
-        (o.produto_codigo ?? "").toLowerCase().includes(q) ||
-        (o.produto_nome ?? "").toLowerCase().includes(q) ||
-        (o.cliente ?? "").toLowerCase().includes(q) ||
-        (o.numero ?? "").toLowerCase().includes(q) ||
-        (o.lote ?? "").toLowerCase().includes(q) ||
-        (ped?.numero ?? "").toLowerCase().includes(q)
-      );
-    });
+    return ops
+      .filter((o) => {
+        if (estado && o.estado !== estado) return false;
+        if (zonaFiltro && o.zona_id !== zonaFiltro) return false;
+        if (!q) return true;
+        const ped = o.pedido_id ? pedidoPorId.get(o.pedido_id) : null;
+        return (
+          (o.produto_codigo ?? "").toLowerCase().includes(q) ||
+          (o.produto_nome ?? "").toLowerCase().includes(q) ||
+          (o.cliente ?? "").toLowerCase().includes(q) ||
+          (o.numero ?? "").toLowerCase().includes(q) ||
+          (o.lote ?? "").toLowerCase().includes(q) ||
+          (ped?.numero ?? "").toLowerCase().includes(q)
+        );
+      })
+      // Stable sort: by created_at ASC so editing doesn't shuffle rows
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   }, [ops, search, estado, zonaFiltro, pedidoPorId]);
 
   function abrirEdit(op: OrdemProducao) {
@@ -83,6 +86,28 @@ export function OPsTab({ ops, pedidos, zonas }: { ops: OrdemProducao[]; pedidos:
     }
     toast.success("Guardado");
   }
+
+  const handleTableKeyDown = useCallback((e: React.KeyboardEvent<HTMLTableElement>) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    const target = e.target as HTMLElement;
+    if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLSelectElement)) return;
+    const cell = target.closest("td");
+    const row = target.closest("tr");
+    if (!cell || !row) return;
+    const cellIdx = Array.from(row.cells).indexOf(cell as HTMLTableCellElement);
+    const tbody = row.closest("tbody");
+    if (!tbody) return;
+    const rows = Array.from(tbody.rows);
+    const rowIdx = rows.indexOf(row as HTMLTableRowElement);
+    const targetRowIdx = e.key === "ArrowUp" ? rowIdx - 1 : rowIdx + 1;
+    if (targetRowIdx < 0 || targetRowIdx >= rows.length) return;
+    e.preventDefault();
+    const targetCell = rows[targetRowIdx].cells[cellIdx];
+    if (!targetCell) return;
+    const input = targetCell.querySelector<HTMLElement>("input, select");
+    input?.focus();
+    if (input instanceof HTMLInputElement) input.select();
+  }, []);
 
   function toDatetimeLocal(iso: string | null): string {
     if (!iso) return "";
@@ -134,7 +159,7 @@ export function OPsTab({ ops, pedidos, zonas }: { ops: OrdemProducao[]; pedidos:
       {detalhesMode ? (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="max-h-[75vh] overflow-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs" onKeyDown={handleTableKeyDown}>
               <thead className="sticky top-0 z-10 bg-slate-50 text-[10px] font-extrabold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-2 py-2 text-right">#</th>

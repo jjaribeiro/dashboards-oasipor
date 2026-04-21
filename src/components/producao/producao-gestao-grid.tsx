@@ -2,7 +2,6 @@
 
 import { useMemo, useState, useCallback } from "react";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
-import { useUpdateReminder } from "@/hooks/use-update-reminder";
 import { useAutoMoveCiclos } from "@/hooks/use-auto-move-ciclos";
 import { useDelayAlert } from "@/hooks/use-delay-alert";
 import { supabase } from "@/lib/supabase/client";
@@ -60,7 +59,6 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
   function patchCiclo(id: string, patch: Partial<EquipamentoCiclo>) {
     setCiclos((prev) => prev.map((c) => c.id === id ? { ...c, ...patch } : c));
   }
-  const updateReminder = useUpdateReminder();
 
   // Auto-move ciclos de esterilização
   useAutoMoveCiclos(ciclos);
@@ -165,20 +163,6 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
         </div>
       </div>
 
-      {updateReminder.show && (
-        <div className="flex items-center justify-between gap-4 bg-amber-500 px-6 py-2 text-white shadow-md">
-          <div className="flex items-center gap-2 font-bold">
-            <span className="text-lg">⚠</span>
-            <span>Hora de atualizar os dados de produção!</span>
-          </div>
-          <button
-            onClick={updateReminder.dismiss}
-            className="rounded-lg bg-white px-4 py-1.5 text-sm font-extrabold text-amber-700 shadow transition-colors hover:bg-amber-50"
-          >
-            Atualizado ✓
-          </button>
-        </div>
-      )}
 
       <div className="flex flex-1 min-h-0 flex-col gap-2 overflow-hidden p-3">
         {/* Produção: 4 colunas — SL1 (combinado) | SASC Picking | SL2 Linhas | SL2 Embalamento */}

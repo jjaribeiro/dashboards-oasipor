@@ -467,7 +467,7 @@ function ProgramarTodosDialog({ pedidos, opsPorPedido, onClose }: {
   // Análise: motivo/avisos por pedido (sem sugerir/auto-selecionar)
   type Analise = {
     pedido: PedidoProducao;
-    rota: ZonaId[];
+    rota: RotaZonaId[];
     precisaProduzir: boolean;
     temComponentes: boolean;
     motivo: string;
@@ -766,9 +766,11 @@ function ProgramarTodosDialog({ pedidos, opsPorPedido, onClose }: {
 }
 
 /* ===== Dialog: Programar Pedido individual (não usado na UI actual, mantido para futuro) ===== */
+type RotaZonaId = ZonaId | "eo" | "";
+
 interface RotaItem {
   id: string;
-  zona_id: ZonaId | "";
+  zona_id: RotaZonaId;
   quantidade_alvo: number;
   inicio_previsto: string; // datetime-local
   fim_previsto: string;
@@ -781,7 +783,7 @@ function isNE(pedido: PedidoProducao): boolean {
 }
 
 // Infere a rota (sequência de zonas) com base em tipo + categoria + NE
-function inferRota(pedido: PedidoProducao): ZonaId[] {
+function inferRota(pedido: PedidoProducao): RotaZonaId[] {
   const isCampo = pedido.categoria === "campo";
   const isPackTrouxa = pedido.categoria === "pack" || pedido.categoria === "trouxa";
   const tipo = pedido.tipo_linha;
@@ -847,7 +849,7 @@ function ProgramarPedidoDialog({ pedido, zonas, opsExistentes, onClose }: {
   }
 
   // Sugestões rápidas de fluxo
-  function aplicarSugestao(zs: ZonaId[]) {
+  function aplicarSugestao(zs: RotaZonaId[]) {
     setRotas(zs.map((z, i) => ({
       id: crypto.randomUUID(),
       zona_id: z,
@@ -1039,7 +1041,7 @@ export function FormPedido({ open, onClose, editItem, readOnly = false, comercia
   const [cliente, setCliente] = useState(editItem?.cliente ?? "");
   const [comercial, setComercial] = useState(editItem?.comercial ?? "");
   const [categoria, setCategoria] = useState(editItem?.categoria ?? "");
-  const [tipoLinha, setTipoLinha] = useState<"manual" | "termoformadora" | "stock" | "campos" | "">(editItem?.tipo_linha ?? "");
+  const [tipoLinha, setTipoLinha] = useState<"manual" | "termoformadora" | "stock" | "campos" | "">((editItem?.tipo_linha as "manual" | "termoformadora" | "stock" | "campos" | null) ?? "");
   const [fichaProducao, setFichaProducao] = useState(editItem?.ficha_producao ?? "");
   const [quantidadeAlvo, setQuantidadeAlvo] = useState(editItem?.quantidade_alvo ?? 0);
   const [quantidadePorCaixa, setQuantidadePorCaixa] = useState<number | "">(editItem?.quantidade_por_caixa ?? "");
