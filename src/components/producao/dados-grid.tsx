@@ -17,7 +17,7 @@ export function DadosGrid({ initialFuncionarios }: Props) {
   const { items: funcionarios, refetch: refetchFunc } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-6">
+    <div className="mx-auto flex h-screen max-w-7xl flex-col px-6 py-6">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <a href="/" className="flex items-center gap-2 text-slate-500 transition-colors hover:text-slate-900" title="Voltar ao hub">
@@ -30,7 +30,9 @@ export function DadosGrid({ initialFuncionarios }: Props) {
         </div>
       </div>
 
-      <GridFuncionarios items={funcionarios} refetch={refetchFunc} />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <GridFuncionarios items={funcionarios} refetch={refetchFunc} />
+      </div>
     </div>
   );
 }
@@ -71,7 +73,7 @@ const EMPTY_FUNC: FuncData = { nome: "", iniciais: "", cor: "#64748b", ativo: tr
 
 function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: () => void }) {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null); // null = novo
+  const [editId, setEditId] = useState<string | null>(null);
   const [data, setData] = useState<FuncData>(EMPTY_FUNC);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
@@ -171,41 +173,89 @@ function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: (
         >+ Novo funcionário</button>
       </div>
 
-      {/* Grid de cards */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-        {filtered.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => openEdit(f)}
-            className={cn(
-              "group relative flex flex-col items-center gap-2 rounded-xl border bg-white p-3 text-center shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md",
-              f.ativo ? "border-slate-200" : "border-slate-200 opacity-60"
+      {/* Tabela */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+              <th className="px-4 py-3">Nome</th>
+              <th className="px-4 py-3 w-20">Iniciais</th>
+              <th className="px-4 py-3 w-36">Departamento</th>
+              <th className="px-4 py-3 w-36">Função</th>
+              <th className="px-4 py-3 w-24">PIN</th>
+              <th className="px-4 py-3 w-28">Acessos</th>
+              <th className="px-4 py-3 w-20 text-center">Estado</th>
+              <th className="px-4 py-3 w-20 text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((f) => (
+              <tr
+                key={f.id}
+                className={cn("border-b border-slate-100 hover:bg-slate-50", !f.ativo && "opacity-50")}
+              >
+                <td className="px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-black text-white"
+                      style={{ backgroundColor: f.cor ?? "#64748b" }}
+                    >
+                      {f.iniciais ?? f.nome.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="font-extrabold text-slate-900">{f.nome}</p>
+                      {f.email && <p className="text-[11px] text-slate-400">{f.email}</p>}
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-2.5 font-mono font-extrabold text-slate-700">{f.iniciais ?? "—"}</td>
+                <td className="px-4 py-2.5 text-slate-600">{f.departamento ?? <span className="text-slate-300">—</span>}</td>
+                <td className="px-4 py-2.5 text-slate-600">{f.funcao ?? <span className="text-slate-300">—</span>}</td>
+                <td className="px-4 py-2.5">
+                  {f.pin
+                    ? <span className="font-mono font-bold text-slate-700">{"•".repeat(f.pin.length)}</span>
+                    : <span className="text-[11px] font-bold text-amber-600">Sem PIN</span>
+                  }
+                </td>
+                <td className="px-4 py-2.5">
+                  <div className="flex flex-wrap gap-0.5">
+                    {(f.acessos ?? []).map((a) => (
+                      <span key={a} className="rounded bg-slate-100 px-1 py-0.5 text-[9px] font-bold uppercase text-slate-600">{a}</span>
+                    ))}
+                    {(f.acessos ?? []).length === 0 && <span className="text-slate-300 text-[11px]">—</span>}
+                  </div>
+                </td>
+                <td className="px-4 py-2.5 text-center">
+                  <span className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase",
+                    f.ativo ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                  )}>
+                    {f.ativo ? "Ativo" : "Inativo"}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <button
+                    onClick={() => openEdit(f)}
+                    className="rounded-md bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200"
+                  >Editar</button>
+                </td>
+              </tr>
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-4 py-10 text-center text-sm font-bold text-slate-400">
+                  {search ? `Nenhum funcionário corresponde a "${search}"` : "Sem funcionários"}
+                </td>
+              </tr>
             )}
-          >
-            <div
-              className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-black text-white shadow-inner ring-2 ring-white"
-              style={{ backgroundColor: f.cor ?? "#64748b" }}
-            >
-              {f.iniciais ?? f.nome.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-            </div>
-            <div>
-              <span className="line-clamp-2 text-xs font-extrabold leading-tight text-slate-900">{f.nome}</span>
-              {(f.funcao || f.departamento) && (
-                <p className="mt-0.5 line-clamp-1 text-[10px] font-bold text-slate-500">
-                  {[f.funcao, f.departamento].filter(Boolean).join(" · ")}
-                </p>
-              )}
-            </div>
-            {!f.ativo && (
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-slate-500">inativo</span>
-            )}
-          </button>
-        ))}
-        {filtered.length === 0 && (
-          <div className="col-span-full rounded-xl border border-dashed border-slate-200 bg-white py-12 text-center text-sm font-bold text-slate-400">
-            {search ? `Nenhum funcionário corresponde a "${search}"` : "Sem funcionários"}
-          </div>
-        )}
+          </tbody>
+        </table>
+        <button
+          onClick={openNew}
+          className="flex w-full items-center justify-center gap-2 border-t border-dashed border-slate-200 py-3 text-sm font-bold text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600"
+        >
+          + Novo Funcionário
+        </button>
       </div>
 
       {/* Modal */}

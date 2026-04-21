@@ -171,6 +171,32 @@ export function KpisDashboard({ zonas, pedidos, ops, rejeitos, pausas, audit, me
     const pausasMotivo = new Map<string, number>();
     for (const p of pausasPeriodo) pausasMotivo.set(p.motivo, (pausasMotivo.get(p.motivo) || 0) + (p.duracao_min || 0));
 
+    // Packs/hora (total units / total active production hours)
+    const totalActiveMs = concluidasPeriodo.reduce((a, o) => {
+      if (!o.inicio || !o.fim_real) return a;
+      return a + (new Date(o.fim_real).getTime() - new Date(o.inicio).getTime());
+    }, 0);
+    const totalHoras = totalActiveMs / 3600000;
+    const packsHora = totalHoras > 0 ? Math.round(unidades / totalHoras) : 0;
+
+    // Cycle time — segundos por pack
+    const cycleTimeSeg = unidades > 0 && totalActiveMs > 0
+      ? Math.round(totalActiveMs / 1000 / unidades)
+      : 0;
+
+    // On-time delivery — % OPs terminadas antes ou à hora prevista
+    const comPrevistoConc = concluidasPeriodo.filter((o) => o.fim_real && o.fim_previsto);
+    const onTimeCount = comPrevistoConc.filter((o) => new Date(o.fim_real!) <= new Date(o.fim_previsto!)).length;
+    const onTimePct = comPrevistoConc.length > 0 ? (onTimeCount / comPrevistoConc.length) * 100 : 100;
+
+    // Setup time — minutos médios entre criação da OP e início real
+    const comInicioReal = concluidasPeriodo.filter((o) => o.inicio && o.created_at);
+    const setupMsTotal = comInicioReal.reduce((a, o) => {
+      const diff = new Date(o.inicio!).getTime() - new Date(o.created_at).getTime();
+      return a + Math.max(0, diff);
+    }, 0);
+    const setupTimeMin = comInicioReal.length > 0 ? setupMsTotal / 60000 / comInicioReal.length : 0;
+
     return {
       unidades, unidadesPrev,
       opsConcl: concluidasPeriodo.length, opsConclPrev: concluidasPrev.length,
@@ -184,6 +210,7 @@ export function KpisDashboard({ zonas, pedidos, ops, rejeitos, pausas, audit, me
       prodZona, fila, prodOp,
       opsAtraso, pedidosAtivos, leadTimeDias,
       pausasMotivo,
+      packsHora, cycleTimeSeg, onTimePct, setupTimeMin,
     };
   }, [ops, pedidos, pausas, zonas, ini, fim, prevIni, prevFim]);
 
@@ -228,7 +255,70 @@ export function KpisDashboard({ zonas, pedidos, ops, rejeitos, pausas, audit, me
         <KpiCard label="Lead time médio" value={`${data.leadTimeDias.toFixed(1)} d`} sub={`${Math.round(data.minParados)} min parados`} tone="slate" icon="⏱" />
       </div>
 
-      {/* Row 2: Charts + OEE gauge + Metas */}
+      {/* Row 2: 4 novos KPIs */}
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <KpiCard
+          label="Packs / hora"
+          value={data.packsHora.toLocaleString("pt-PT")}
+          sub="média período"
+          tone="sky"
+          icon="⚡"
+        />
+        <KpiCard
+          label="Cycle time"
+          value={data.cycleTimeSeg >= 60 ? `${Math.floor(data.cycleTimeSeg / 60)}m ${data.cycleTimeSeg % 60}s` : `${data.cycleTimeSeg}s`}
+          sub="por pack"
+          tone="violet"
+          icon="🔄"
+        />
+        <KpiCard
+          label="On-time delivery"
+          value={`${data.onTimePct.toFixed(0)}%`}
+          sub="OPs a tempo"
+          tone={data.onTimePct >= 90 ? "emerald" : data.onTimePct >= 70 ? "amber" : "red"}
+          icon="🚚"
+        />
+        <KpiCard
+          label="Setup time médio"
+          value={data.setupTimeMin >= 60 ? `${(data.setupTimeMin / 60).toFixed(1)}h` : `${Math.round(data.setupTimeMin)}m`}
+          sub="criação → início"
+          tone={data.setupTimeMin <= 30 ? "emerald" : data.setupTimeMin <= 120 ? "amber" : "red"}
+          icon="🔧"
+        />
+      </div>
+
+      {/* Row 3: Breakdown por sala */}
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        {(["sala_limpa_1", "sala_limpa_2", "esterilizacao", "embalamento"] as const).map((area) => {
+          const areaLabel: Record<string, string> = {
+            sala_limpa_1: "SL1 — Produção",
+            sala_limpa_2: "SL2 — Linhas",
+            esterilizacao: "Esterilização",
+            embalamento: "Embalamento",
+          };
+          const areaZonas = zonas.filter((z) => z.area === area);
+          const unidsArea = areaZonas.reduce((a, z) => a + (data.prodZona.get(z.id) || 0), 0);
+          const filaArea = areaZonas.reduce((a, z) => a + (data.fila.get(z.id) || 0), 0);
+          const topZona = areaZonas.reduce<{ zona: ZonaProducao | null; v: number }>((best, z) => {
+            const v = data.prodZona.get(z.id) || 0;
+            return v > best.v ? { zona: z, v } : best;
+          }, { zona: null, v: 0 });
+          return (
+            <div key={area} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">{areaLabel[area] ?? area}</p>
+              <p className="mt-1 text-xl font-black text-slate-900">{unidsArea.toLocaleString("pt-PT")} <span className="text-sm font-bold text-slate-400">un</span></p>
+              <p className="text-[10px] font-bold text-slate-500">{filaArea} OP{filaArea !== 1 ? "s" : ""} na fila</p>
+              {topZona.zona && topZona.v > 0 && (
+                <p className="mt-1 truncate text-[10px] font-bold text-emerald-600" title={ZONA_LABEL[topZona.zona.id] ?? topZona.zona.nome}>
+                  ▲ {ZONA_LABEL[topZona.zona.id] ?? topZona.zona.nome}: {topZona.v.toLocaleString("pt-PT")} un
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Row 4: Charts + OEE gauge + Metas */}
       <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-12 gap-3">
         {/* Trend line 14 dias */}
         <Panel titulo="Produção diária — últimos 14 dias" className="col-span-12 lg:col-span-6">

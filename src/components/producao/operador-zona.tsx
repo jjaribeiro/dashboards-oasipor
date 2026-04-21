@@ -106,6 +106,8 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
   const [cicloForm, setCicloForm] = useState<{ open: boolean; item: EquipamentoCiclo | null }>({ open: false, item: null });
   const [transferOP, setTransferOP] = useState<OrdemProducao | null>(null);
   const [confirmConcluir, setConfirmConcluir] = useState<OrdemProducao | null>(null);
+  const [confirmAutoEmbalamento, setConfirmAutoEmbalamento] = useState<OrdemProducao | null>(null);
+  const [confirmRotulagem, setConfirmRotulagem] = useState<OrdemProducao | null>(null);
   const [pausaDialog, setPausaDialog] = useState<OrdemProducao | null>(null);
   const [rejeitoDialog, setRejeitoDialog] = useState<OrdemProducao | null>(null);
 
@@ -121,8 +123,14 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
     });
 
   // Fila = planeada + concluida (aguardam ação)
+  // Exceção: manual/termo/embalamento não mostram concluídas — já foram para embalamento/EO
+  const filaConcluicaoHidden = ["sl2_manual", "sl2_termo", "sl2_embalamento"];
   const fila = opsFiltradas
-    .filter((o) => o.estado === "planeada" || o.estado === "concluida")
+    .filter((o) => {
+      if (o.estado !== "planeada" && o.estado !== "concluida") return false;
+      if (o.estado === "concluida" && filaConcluicaoHidden.includes(o.zona_id)) return false;
+      return true;
+    })
     .sort((a, b) => {
       const da = a.inicio_previsto ?? a.created_at;
       const db = b.inicio_previsto ?? b.created_at;
@@ -241,10 +249,14 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
   }
 
   function retomar(op: OrdemProducao) {
+    const fim = new Date().toISOString();
+    const duracaoMin = op.pausada_em
+      ? Math.max(1, Math.round((Date.now() - new Date(op.pausada_em).getTime()) / 60000))
+      : null;
     patchOp(op.id, { estado: "em_curso", motivo_pausa: null, pausada_em: null });
     toast.success("OP retomada");
     supabase.from("producao_pausas")
-      .update({ fim: new Date().toISOString() })
+      .update({ fim, ...(duracaoMin !== null ? { duracao_min: duracaoMin } : {}) })
       .eq("op_id", op.id)
       .is("fim", null)
       .then(() => {});
@@ -317,6 +329,99 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
     logAction({ ...actor, acao: "op_rejeito", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, quantidade, motivo: motivoLabel, notas } });
   }
 
+  async function registarRotulagemRecebida(op: OrdemProducao) {
+    const { data: existente } = await supabase
+      .from("rotulagem_inspecoes")
+      .select("id")
+      .eq("op_id", op.id)
+      .limit(1);
+    if (existente && existente.length > 0) {
+      // Já existe — marcar como aprovado
+      const { error } = await supabase
+        .from("rotulagem_inspecoes")
+        .update({ resultado: "aprovado" })
+        .eq("op_id", op.id);
+      if (error) { toast.error("Erro a registar rotulagem"); return; }
+    } else {
+      const { error } = await supabase.from("rotulagem_inspecoes").insert({
+        op_id: op.id,
+        pedido_id: op.pedido_id,
+        lote: op.lote,
+        check_lote: true,
+        check_validade: true,
+        check_ref_cliente: true,
+        check_idioma: true,
+        check_quantidade: true,
+        resultado: "aprovado",
+        pessoa_id: actor.pessoaId,
+        pessoa_nome: actor.pessoaNome,
+        notas: "Rotulagem recebida e verificada pelo operador",
+      });
+      if (error) { toast.error("Erro a registar rotulagem"); return; }
+    }
+    toast.success("Rotulagem recebida — qualidade marcada como concluída");
+    logAction({ ...actor, acao: "rotulagem_recebida", alvoTabela: "rotulagem_inspecoes", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo } });
+  }
+
+  async function concluirEMoverEmbalamento(op: OrdemProducao) {
+    setConfirmConcluir(null);
+    const agora = new Date().toISOString();
+    const antes = { estado: op.estado, fim_real: op.fim_real, zona_id: op.zona_id };
+    // Concluir e mover automaticamente para embalamento
+    patchOp(op.id, { estado: "concluida", fim_real: agora });
+    toast.success("Concluído — a mover para Embalamento");
+    // Pequena pausa para o operador ver o feedback, depois mover
+    setTimeout(() => {
+      removeOpLocal(op.id);
+      supabase.from("ordens_producao")
+        .update({ estado: "concluida", fim_real: agora })
+        .eq("id", op.id)
+        .then(({ error }) => {
+          if (error) { toast.error("Erro ao concluir"); return; }
+          // Criar nova OP no embalamento
+          supabase.from("ordens_producao").insert({
+            pedido_id: op.pedido_id,
+            zona_id: "sl2_embalamento",
+            produto_id: op.produto_id,
+            produto_codigo: op.produto_codigo,
+            produto_nome: op.produto_nome,
+            lote: op.lote,
+            cliente: op.cliente,
+            categoria: op.categoria,
+            quantidade_alvo: op.quantidade_atual,
+            quantidade_atual: 0,
+            quantidade_rejeitada: 0,
+            estado: "planeada",
+            prioridade: op.prioridade,
+            tipo_linha: op.tipo_linha,
+            numero: op.numero,
+            notas: op.notas,
+            op_anterior_id: op.id,
+            ordem_fila: op.ordem_fila,
+          }).then(({ error: e2 }) => {
+            if (e2) toast.error("Erro a criar OP no embalamento");
+          });
+        });
+      logAction({ ...actor, acao: "op_concluir_auto_embalamento", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, qtd: op.quantidade_atual, antes } });
+    }, 800);
+  }
+
+  const SL1_ZONAS = ["sl1_campos", "sl1_laminados", "sl1_mascaras", "sl1_toucas", "sl1_outros"];
+
+  async function avancarFase(op: OrdemProducao) {
+    const fases: Array<"setup" | "producao" | "limpeza"> = ["setup", "producao", "limpeza"];
+    const idx = op.fase_atual ? fases.indexOf(op.fase_atual) : -1;
+    const novaFase = fases[idx + 1] ?? null;
+    patchOp(op.id, { fase_atual: novaFase });
+    const labels: Record<string, string> = { setup: "Set Up", producao: "Produção", limpeza: "Limpeza" };
+    toast.success(novaFase ? `Fase: ${labels[novaFase]}` : "Fase concluída");
+    supabase.from("ordens_producao")
+      .update({ fase_atual: novaFase })
+      .eq("id", op.id)
+      .then(({ error }) => { if (error) toast.error("Erro a atualizar fase"); });
+    logAction({ ...actor, acao: "op_fase", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { fase: novaFase, produto: op.produto_codigo } });
+  }
+
   async function solicitarCq(op: OrdemProducao) {
     // Verifica se já existe pedido CQ pendente para esta OP
     const { data: existente } = await supabase
@@ -347,7 +452,22 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
 
   function transferir(op: OrdemProducao, destinoId: string, destinoLabel: string) {
     setTransferOP(null);
-    // Remove da lista local (já não pertence a esta zona)
+
+    // Bloquear transferência sem unidades produzidas
+    if (op.quantidade_atual === 0) {
+      toast.error("Não é possível transferir — quantidade produzida é zero.");
+      return;
+    }
+
+    // Avisar se quantidade inferior ao alvo (mas permitir com confirmação)
+    if (op.quantidade_alvo > 0 && op.quantidade_atual < op.quantidade_alvo) {
+      const falta = op.quantidade_alvo - op.quantidade_atual;
+      toast.warning(
+        `A transferir com quantidade inferior ao alvo (faltam ${falta} un). Verifique se está correto.`,
+        { duration: 6000 }
+      );
+    }
+
     removeOpLocal(op.id);
     toast.success(`Transferido para ${destinoLabel}`);
     supabase.from("ordens_producao")
@@ -457,30 +577,37 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
                   "grid gap-3",
                   emCursoOuPausada.length === 1 ? "grid-cols-1" : "grid-cols-1 2xl:grid-cols-2"
                 )}>
-                  {emCursoOuPausada.map((op) => (
-                    <OPAtual
-                      key={op.id}
-                      op={op}
-                      compact={emCursoOuPausada.length > 1}
-                      showSubBadge={!!zonasAgrupadas}
-                      onSetQty={(n) => setQtyFor(op, n)}
-                      onPause={() => setPausaDialog(op)}
-                      onResume={() => retomar(op)}
-                      onEnd={() => setConfirmConcluir(op)}
-                      onView={() => setViewOP({ open: true, item: op })}
-                      onRejeito={() => setRejeitoDialog(op)}
-                      onSolicitarCq={() => solicitarCq(op)}
-                      hasTransfers={getTransfersFor(op).length > 0}
-                      onTransfer={() => {
-                        const destinos = getTransfersFor(op);
-                        if (destinos.length === 1) {
-                          transferir(op, destinos[0].id, destinos[0].label);
-                        } else {
-                          setTransferOP(op);
-                        }
-                      }}
-                    />
-                  ))}
+                  {emCursoOuPausada.map((op) => {
+                    const eManualOuTermo = op.zona_id === "sl2_manual" || op.zona_id === "sl2_termo";
+                    const eSL1 = SL1_ZONAS.includes(op.zona_id);
+                    return (
+                      <OPAtual
+                        key={op.id}
+                        op={op}
+                        compact={emCursoOuPausada.length > 1}
+                        showSubBadge={!!zonasAgrupadas}
+                        onSetQty={(n) => setQtyFor(op, n)}
+                        onPause={() => setPausaDialog(op)}
+                        onResume={() => retomar(op)}
+                        onEnd={() => setConfirmConcluir(op)}
+                        onView={() => setViewOP({ open: true, item: op })}
+                        onRejeito={() => setRejeitoDialog(op)}
+                        onSolicitarCq={() => solicitarCq(op)}
+                        hasTransfers={getTransfersFor(op).length > 0}
+                        onTransfer={() => {
+                          const destinos = getTransfersFor(op);
+                          if (destinos.length === 1) {
+                            transferir(op, destinos[0].id, destinos[0].label);
+                          } else {
+                            setTransferOP(op);
+                          }
+                        }}
+                        onRotulagemRecebida={eManualOuTermo ? () => setConfirmRotulagem(op) : undefined}
+                        onConcluirAutoEmbalamento={eManualOuTermo ? () => setConfirmAutoEmbalamento(op) : undefined}
+                        onAvancarFase={eSL1 ? () => avancarFase(op) : undefined}
+                      />
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -523,13 +650,20 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
         )}
       </div>
 
-      {viewOP.open && (
-        <ViewOP
-          open={viewOP.open}
-          onOpenChange={(o) => setViewOP((s) => ({ ...s, open: o }))}
-          op={viewOP.item}
-        />
-      )}
+      {viewOP.open && (() => {
+        const allOps = [...emCursoOuPausada, ...fila];
+        const idx = viewOP.item ? allOps.findIndex((o) => o.id === viewOP.item!.id) : -1;
+        return (
+          <ViewOP
+            open={viewOP.open}
+            onOpenChange={(o) => setViewOP((s) => ({ ...s, open: o }))}
+            op={viewOP.item}
+            ops={allOps}
+            currentIndex={idx >= 0 ? idx : 0}
+            onNavigate={(i) => setViewOP({ open: true, item: allOps[i] })}
+          />
+        );
+      })()}
       {transferOP && (
         <TransferDialog
           op={transferOP}
@@ -562,6 +696,26 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
           onConfirm={() => concluirConfirmado(confirmConcluir)}
         />
       )}
+      {confirmAutoEmbalamento && (
+        <ConfirmDialog
+          title="Concluir e mover para Embalamento?"
+          message="A OP será marcada como concluída e uma nova OP será criada automaticamente no Embalamento."
+          variant="warning"
+          confirmLabel="✓ Concluído"
+          onCancel={() => setConfirmAutoEmbalamento(null)}
+          onConfirm={() => { concluirEMoverEmbalamento(confirmAutoEmbalamento); setConfirmAutoEmbalamento(null); }}
+        />
+      )}
+      {confirmRotulagem && (
+        <ConfirmDialog
+          title="Rotulagem Recebida?"
+          message="Confirma que a rotulagem foi recebida e verificada para esta OP?"
+          variant="default"
+          confirmLabel="✓ Confirmar"
+          onCancel={() => setConfirmRotulagem(null)}
+          onConfirm={() => { registarRotulagemRecebida(confirmRotulagem); setConfirmRotulagem(null); }}
+        />
+      )}
       {pausaDialog && (
         <PausaDialog
           equipa={equipa}
@@ -592,7 +746,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
    OP ATUAL
    ========================================================== */
 function OPAtual({
-  op, compact = false, showSubBadge, onSetQty, onPause, onResume, onEnd, onView, onRejeito, onSolicitarCq, hasTransfers, onTransfer,
+  op, compact = false, showSubBadge, onSetQty, onPause, onResume, onEnd, onView, onRejeito, onSolicitarCq, hasTransfers, onTransfer, onRotulagemRecebida, onConcluirAutoEmbalamento, onAvancarFase,
 }: {
   op: OrdemProducao; compact?: boolean; showSubBadge: boolean;
   onSetQty: (n: number) => void;
@@ -600,6 +754,9 @@ function OPAtual({
   onRejeito: () => void;
   onSolicitarCq: () => void;
   hasTransfers: boolean; onTransfer: () => void;
+  onRotulagemRecebida?: () => void;
+  onConcluirAutoEmbalamento?: () => void;
+  onAvancarFase?: () => void;
 }) {
   const pct = op.quantidade_alvo > 0 ? Math.min(100, (op.quantidade_atual / op.quantidade_alvo) * 100) : 0;
   const restante = minutesUntil(op.fim_previsto);
@@ -762,11 +919,67 @@ function OPAtual({
         </div>
       )}
 
-      {/* Ações — no picking só pausa + transferir (sem concluir/rejeitar) */}
+      {/* SL1 — Fases de produção */}
+      {onAvancarFase && (() => {
+        const FASES: Array<{ id: "setup" | "producao" | "limpeza"; icon: string; label: string; cor: string; btn: string }> = [
+          { id: "setup",    icon: "🔧", label: "Set Up",   cor: "bg-orange-50 border-orange-200 text-orange-700", btn: "bg-orange-500 hover:bg-orange-600" },
+          { id: "producao", icon: "▶",  label: "Produção", cor: "bg-emerald-50 border-emerald-200 text-emerald-700", btn: "bg-emerald-600 hover:bg-emerald-700" },
+          { id: "limpeza",  icon: "🧹", label: "Limpeza",  cor: "bg-sky-50 border-sky-200 text-sky-700", btn: "bg-sky-600 hover:bg-sky-700" },
+        ];
+        const faseAtual = FASES.find((f) => f.id === op.fase_atual);
+        const faseIdx = op.fase_atual ? FASES.findIndex((f) => f.id === op.fase_atual) : -1;
+        const proxFase = FASES[faseIdx + 1];
+        return (
+          <div className="mt-4 rounded-2xl border-2 border-slate-200 bg-slate-50 p-4">
+            <p className="mb-3 text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Fases de produção (SL1)</p>
+            {/* Step indicators */}
+            <div className="mb-3 flex items-center gap-1">
+              {FASES.map((f, i) => (
+                <div key={f.id} className="flex items-center gap-1">
+                  <div className={cn(
+                    "flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-extrabold",
+                    faseIdx >= i ? f.cor : "border-slate-200 bg-white text-slate-400"
+                  )}>
+                    <span>{f.icon}</span>
+                    <span>{f.label}</span>
+                    {faseIdx > i && <span className="text-[10px]">✓</span>}
+                    {faseIdx === i && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-current animate-pulse" />}
+                  </div>
+                  {i < FASES.length - 1 && <span className="text-slate-300">→</span>}
+                </div>
+              ))}
+            </div>
+            {/* Next phase button */}
+            {proxFase ? (
+              <button
+                onClick={onAvancarFase}
+                className={cn("w-full rounded-xl py-3 text-sm font-extrabold text-white shadow-sm transition-all active:scale-95", proxFase.btn)}
+              >
+                {proxFase.icon} Início {proxFase.label}
+              </button>
+            ) : faseAtual ? (
+              <p className="text-center text-xs font-bold text-slate-500">✓ Limpeza em curso — pode concluir a OP</p>
+            ) : (
+              <button
+                onClick={onAvancarFase}
+                className="w-full rounded-xl bg-orange-500 py-3 text-sm font-extrabold text-white shadow-sm transition-all hover:bg-orange-600 active:scale-95"
+              >
+                🔧 Início Set Up
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Ações — condicionais por zona */}
       {(() => {
         const ePicking = op.zona_id === "sl2_picking";
+        const eManualOuTermo = op.zona_id === "sl2_manual" || op.zona_id === "sl2_termo";
+        const eEmbalamento = op.zona_id === "sl2_embalamento";
+
         return (
           <>
+            {/* Pausa / Retomar */}
             <div className={cn("mt-5 grid gap-2", ePicking ? "grid-cols-1" : "grid-cols-3")}>
               {pausada ? (
                 <button onClick={onResume} className="rounded-2xl bg-emerald-600 py-4 text-lg font-extrabold text-white shadow-md transition-all hover:bg-emerald-700 active:scale-95">
@@ -778,25 +991,50 @@ function OPAtual({
                 </button>
               )}
               {!ePicking && (
-                <button onClick={onEnd} className="col-span-2 rounded-2xl bg-blue-600 py-4 text-lg font-extrabold text-white shadow-md transition-all hover:bg-blue-700 active:scale-95">
-                  ✓ Concluir OP
-                </button>
+                eManualOuTermo && onConcluirAutoEmbalamento ? (
+                  <button onClick={onConcluirAutoEmbalamento} className="col-span-2 rounded-2xl bg-blue-600 py-4 text-lg font-extrabold text-white shadow-md transition-all hover:bg-blue-700 active:scale-95">
+                    ✓ Concluído
+                  </button>
+                ) : (
+                  <button onClick={onEnd} className="col-span-2 rounded-2xl bg-blue-600 py-4 text-lg font-extrabold text-white shadow-md transition-all hover:bg-blue-700 active:scale-95">
+                    ✓ Concluir OP
+                  </button>
+                )
               )}
             </div>
-            {!ePicking && (
+
+            {/* Botões secundários */}
+            {!ePicking && !eEmbalamento && (
               <div className="mt-2 grid grid-cols-2 gap-2">
-                <button
-                  onClick={onRejeito}
-                  className="rounded-2xl border-2 border-red-200 bg-red-50 py-3 text-sm font-extrabold text-red-700 transition-all hover:bg-red-100 active:scale-95"
-                >
-                  ❌ Registar Rejeitados
-                </button>
+                {!eManualOuTermo && (
+                  <button
+                    onClick={onRejeito}
+                    className="rounded-2xl border-2 border-red-200 bg-red-50 py-3 text-sm font-extrabold text-red-700 transition-all hover:bg-red-100 active:scale-95"
+                  >
+                    ❌ Registar Rejeitados
+                  </button>
+                )}
                 <button
                   onClick={onSolicitarCq}
-                  className="rounded-2xl border-2 border-sky-300 bg-sky-50 py-3 text-sm font-extrabold text-sky-700 transition-all hover:bg-sky-100 active:scale-95"
+                  className={cn(
+                    "rounded-2xl border-2 border-sky-300 bg-sky-50 py-3 text-sm font-extrabold text-sky-700 transition-all hover:bg-sky-100 active:scale-95",
+                    eManualOuTermo && "col-span-2"
+                  )}
                   title="Chamar a equipa de Qualidade para inspeção da OP"
                 >
                   🔍 Solicitar CQ
+                </button>
+              </div>
+            )}
+
+            {/* Linha manual: rotulagem recebida */}
+            {eManualOuTermo && onRotulagemRecebida && (
+              <div className="mt-2">
+                <button
+                  onClick={onRotulagemRecebida}
+                  className="w-full rounded-2xl border-2 border-teal-300 bg-teal-50 py-3 text-sm font-extrabold text-teal-700 transition-all hover:bg-teal-100 active:scale-95"
+                >
+                  🏷 Rotulagem Recebida
                 </button>
               </div>
             )}
@@ -804,8 +1042,8 @@ function OPAtual({
         );
       })()}
 
-      {/* Transferir (se há destinos disponíveis) */}
-      {hasTransfers && (
+      {/* Transferir — oculto em manual/termo/embalamento */}
+      {hasTransfers && op.zona_id !== "sl2_manual" && op.zona_id !== "sl2_termo" && op.zona_id !== "sl2_embalamento" && (
         <button
           onClick={onTransfer}
           className="mt-2 rounded-2xl border-2 border-purple-300 bg-purple-50 py-3 text-base font-extrabold text-purple-700 shadow-sm transition-all hover:bg-purple-100 active:scale-95"
@@ -1204,13 +1442,87 @@ function TransferDialog({ op, destinos, onCancel, onConfirm }: {
 }
 
 /* ==========================================================
-   PAINEL DE CICLO
+   PAINEL DE CICLO (Operador EO)
    ========================================================== */
 function CicloPanel({ ciclo, onOpen }: { ciclo: EquipamentoCiclo | undefined; onOpen: (c: EquipamentoCiclo | null) => void }) {
   const estado = ciclo?.estado ?? "vazio";
   const progress = ciclo ? cycleProgress(ciclo.inicio, ciclo.fim_previsto) : 0;
   const restante = ciclo ? minutesUntil(ciclo.fim_previsto) : null;
   const atraso = restante !== null && restante < 0;
+
+  // Paletes planeadas (para mostrar ao operador quando vazio)
+  const [paletesPlaneadas, setPaletesPlaneadas] = useState<Array<{ numero: number; tipo_caixa: string | null; nOps: number }>>([]);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (estado !== "vazio") return;
+    supabase
+      .from("paletes_eo")
+      .select("id, numero, tipo_caixa, estado")
+      .eq("estado", "planeamento")
+      .order("numero")
+      .then(async ({ data: pal }) => {
+        if (!pal || pal.length === 0) { setPaletesPlaneadas([]); return; }
+        const { data: ops } = await supabase
+          .from("ordens_producao")
+          .select("palete_eo_id")
+          .in("palete_eo_id", pal.map((p) => p.id));
+        const countPorPalete = new Map<string, number>();
+        for (const o of (ops ?? [])) {
+          if (o.palete_eo_id) countPorPalete.set(o.palete_eo_id, (countPorPalete.get(o.palete_eo_id) ?? 0) + 1);
+        }
+        setPaletesPlaneadas(
+          pal
+            .filter((p) => (countPorPalete.get(p.id) ?? 0) > 0)
+            .map((p) => ({ numero: p.numero, tipo_caixa: p.tipo_caixa, nOps: countPorPalete.get(p.id) ?? 0 }))
+        );
+      });
+  }, [estado]);
+
+  async function submeterCiclo() {
+    if (paletesPlaneadas.length === 0) { toast.error("Sem paletes planeadas pela gestão"); return; }
+    if (!confirm(`Submeter ciclo com ${paletesPlaneadas.length} palete(s)?`)) return;
+    setSubmitting(true);
+    // Buscar paletes completas
+    const { data: paletes } = await supabase.from("paletes_eo").select("*").eq("estado", "planeamento").order("numero");
+    const { data: ops } = await supabase.from("ordens_producao").select("*").not("palete_eo_id", "is", null);
+    const opsPorPalete = new Map<string, typeof ops>();
+    for (const o of (ops ?? [])) {
+      if (!o.palete_eo_id) continue;
+      const arr = opsPorPalete.get(o.palete_eo_id) ?? [];
+      arr.push(o);
+      opsPorPalete.set(o.palete_eo_id, arr);
+    }
+    const comConteudo = (paletes ?? []).filter((p) => (opsPorPalete.get(p.id) ?? []).length > 0);
+    if (comConteudo.length === 0) { toast.error("Paletes sem conteúdo"); setSubmitting(false); return; }
+
+    const conteudoTxt = comConteudo.map((p) => {
+      const its = opsPorPalete.get(p.id) ?? [];
+      return `P${p.numero}[${p.tipo_caixa ?? "?"}]: ${its.map((i) => `${i.produto_codigo ?? ""} ${i.produto_nome}`).join(", ")}`;
+    }).join(" | ");
+
+    const { data: cicloData, error } = await supabase.from("equipamento_ciclo").insert({
+      zona_id: "pre_cond_1",
+      estado: "em_ciclo",
+      conteudo: conteudoTxt,
+      paletes: comConteudo.length,
+      paletes_detalhe: comConteudo.map((p) => ({
+        numero: p.numero,
+        tipo_caixa: p.tipo_caixa,
+        ops: (opsPorPalete.get(p.id) ?? []).map((i) => ({ op_id: i.id, produto: i.produto_nome, ref: i.produto_codigo })),
+      })),
+      inicio: new Date().toISOString(),
+    }).select().single();
+
+    if (error || !cicloData) { toast.error("Erro ao submeter ciclo"); setSubmitting(false); return; }
+    const ids = comConteudo.map((p) => p.id);
+    await supabase.from("paletes_eo").update({ estado: "em_pre_cond", ciclo_id: cicloData.id, fechada_em: new Date().toISOString() }).in("id", ids);
+    const novas = Array.from({ length: 8 }, (_, i) => ({ numero: i + 1, estado: "planeamento" }));
+    await supabase.from("paletes_eo").insert(novas);
+    toast.success("Ciclo submetido para esterilização");
+    setPaletesPlaneadas([]);
+    setSubmitting(false);
+  }
 
   return (
     <div className={cn(
@@ -1228,7 +1540,7 @@ function CicloPanel({ ciclo, onOpen }: { ciclo: EquipamentoCiclo | undefined; on
           onClick={() => onOpen(ciclo ?? null)}
           className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 shadow-sm hover:bg-slate-50"
         >
-          {ciclo ? "Ver detalhes" : "Carregar"}
+          {ciclo ? "Ver detalhes" : "Gerir"}
         </button>
       </div>
 
@@ -1272,11 +1584,37 @@ function CicloPanel({ ciclo, onOpen }: { ciclo: EquipamentoCiclo | undefined; on
       )}
 
       {estado === "vazio" && (
-        <div className="mt-8 rounded-2xl border-2 border-dashed border-slate-300 p-10 text-center">
-          <div className="mb-2 text-5xl">🔒</div>
-          <p className="text-2xl font-black text-slate-400">Equipamento vazio</p>
-          <p className="mt-1 text-sm font-bold text-slate-500">A gestão irá carregar o próximo ciclo</p>
-        </div>
+        <>
+          {paletesPlaneadas.length > 0 ? (
+            <div className="mt-6">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500 mb-3">
+                Paletes prontas pela gestão ({paletesPlaneadas.length})
+              </p>
+              <div className="grid grid-cols-4 gap-2 mb-6">
+                {paletesPlaneadas.map((p) => (
+                  <div key={p.numero} className="flex flex-col items-center justify-center rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3 text-center">
+                    <span className="text-2xl font-black text-emerald-700">P{p.numero}</span>
+                    {p.tipo_caixa && <span className="mt-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-extrabold uppercase text-emerald-600">{p.tipo_caixa}</span>}
+                    <span className="mt-1 text-[10px] font-bold text-emerald-600">{p.nOps} OP{p.nOps === 1 ? "" : "s"}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={submeterCiclo}
+                disabled={submitting}
+                className="w-full rounded-2xl bg-emerald-600 py-5 text-2xl font-black text-white shadow-lg transition-all hover:bg-emerald-700 active:scale-[0.98] disabled:opacity-50"
+              >
+                {submitting ? "A submeter…" : "▶ Submeter Ciclo → Esterilizador"}
+              </button>
+            </div>
+          ) : (
+            <div className="mt-8 rounded-2xl border-2 border-dashed border-slate-300 p-10 text-center">
+              <div className="mb-2 text-5xl">🔒</div>
+              <p className="text-2xl font-black text-slate-400">Aguardar planeamento</p>
+              <p className="mt-1 text-sm font-bold text-slate-500">A gestão ainda não preparou paletes para este ciclo</p>
+            </div>
+          )}
+        </>
       )}
 
       {estado === "concluido" && (

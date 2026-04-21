@@ -47,6 +47,18 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
     editItem ? formZonaFromId(editItem.zona_id) : (defaultZona ? formZonaFromId(defaultZona) : "")
   );
 
+  // Keyboard navigation between OPs
+  useEffect(() => {
+    if (!open) return;
+    function handler(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+      if ((e.key === "ArrowLeft" || e.key === "ArrowUp") && onPrev) { e.preventDefault(); onPrev(); }
+      if ((e.key === "ArrowRight" || e.key === "ArrowDown") && onNext) { e.preventDefault(); onNext(); }
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, onPrev, onNext]);
+
   // Autocomplete de produtos
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [refValue, setRefValue] = useState(editItem?.produto_codigo ?? "");
@@ -260,7 +272,16 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto border-slate-200 bg-white text-slate-900 sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{editItem ? "Editar Ordem de Produção" : "Nova Ordem de Produção"}</DialogTitle>
+          <div className="flex items-center justify-between gap-2">
+            <DialogTitle>{editItem ? "Editar Ordem de Produção" : "Nova Ordem de Produção"}</DialogTitle>
+            {navInfo && (
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={onPrev} disabled={!onPrev} className="rounded border border-slate-200 px-2 py-0.5 text-sm font-bold text-slate-500 disabled:opacity-30 hover:bg-slate-50" title="← anterior">←</button>
+                <span className="text-xs font-bold text-slate-500">{navInfo.current}/{navInfo.total}</span>
+                <button onClick={onNext} disabled={!onNext} className="rounded border border-slate-200 px-2 py-0.5 text-sm font-bold text-slate-500 disabled:opacity-30 hover:bg-slate-50" title="→ próxima">→</button>
+              </div>
+            )}
+          </div>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
