@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
+import dynamic from "next/dynamic";
 import { Toaster } from "@/components/ui/sonner";
-import { FeedbackButton } from "@/components/feedback-button";
 import "./globals.css";
+
+const FeedbackButton = dynamic(
+  () => import("@/components/feedback-button").then((m) => m.FeedbackButton),
+  { ssr: false }
+);
 
 export const metadata: Metadata = {
   title: "Dashboards Oasipor",
