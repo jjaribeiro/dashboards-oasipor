@@ -35,7 +35,7 @@ export function FeedbackButton() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 left-6 z-40 flex items-center gap-2 rounded-full bg-slate-800 px-4 py-2.5 text-xs font-extrabold text-white shadow-lg transition-all hover:bg-slate-700 hover:shadow-xl"
+        className="fixed top-3 right-4 z-40 flex items-center gap-1.5 rounded-full border border-slate-300 bg-white/80 px-3 py-1.5 text-[11px] font-extrabold text-slate-600 shadow-sm backdrop-blur-sm transition-all hover:bg-white hover:shadow-md"
         title="Enviar sugestão de melhoria"
       >
         💡 Sugestão

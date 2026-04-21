@@ -66,7 +66,7 @@ export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) 
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {tab === "funcionarios" && <GridFuncionarios items={funcionarios} refetch={refetchFunc} />}
+        {tab === "funcionarios" && <GridFuncionarios items={funcionarios} refetch={refetchFunc} pessoaNome={session?.pessoaNome} />}
         {tab === "produtos" && <TabelaProdutos items={produtos} refetch={refetchProd} />}
         {tab === "sugestoes" && isAdmin && <TabelaSugestoes />}
       </div>
@@ -110,7 +110,7 @@ type FuncData = {
 
 const EMPTY_FUNC: FuncData = { nome: "", iniciais: "", cor: "#64748b", ativo: true, email: "", departamento: "", funcao: "", acessos: [], pin: "" };
 
-function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: () => void }) {
+function GridFuncionarios({ items, refetch, pessoaNome }: { items: Funcionario[]; refetch: () => void; pessoaNome?: string }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [data, setData] = useState<FuncData>(EMPTY_FUNC);
@@ -170,21 +170,45 @@ function GridFuncionarios({ items, refetch }: { items: Funcionario[]; refetch: (
       acessos: data.acessos,
       pin: data.pin.trim() || null,
     };
-    const { error } = editId
-      ? await supabase.from("funcionarios").update(payload).eq("id", editId)
-      : await supabase.from("funcionarios").insert({ ...payload, ativo: true });
-    setSaving(false);
-    if (error) toast.error(`Erro: ${error.message}`);
-    else { toast.success(editId ? "Guardado" : "Criado"); close(); refetch(); }
-  }, [editId, data, refetch]);
+    let savedId = editId;
+    if (editId) {
+      const { error } = await supabase.from("funcionarios").update(payload).eq("id", editId);
+      setSaving(false);
+      if (error) { toast.error(`Erro: ${error.message}`); return; }
+    } else {
+      const { data: inserted, error } = await supabase.from("funcionarios").insert({ ...payload, ativo: true }).select("id").single();
+      setSaving(false);
+      if (error) { toast.error(`Erro: ${error.message}`); return; }
+      savedId = inserted?.id ?? null;
+    }
+    supabase.from("audit_log").insert({
+      pessoa_nome: pessoaNome ?? null,
+      acao: editId ? "editar_funcionario" : "criar_funcionario",
+      alvo_tabela: "funcionarios",
+      alvo_id: savedId,
+      detalhes: payload,
+    });
+    toast.success(editId ? "Guardado" : "Criado");
+    close();
+    refetch();
+  }, [editId, data, refetch, pessoaNome]);
 
   const remove = useCallback(async () => {
     if (!editId) return;
     if (!confirm(`Apagar "${data.nome}"? Histórico mantém-se.`)) return;
     const { error } = await supabase.from("funcionarios").delete().eq("id", editId);
-    if (error) toast.error("Erro ao apagar");
-    else { toast.success("Apagado"); close(); refetch(); }
-  }, [editId, data.nome, refetch]);
+    if (error) { toast.error("Erro ao apagar"); return; }
+    supabase.from("audit_log").insert({
+      pessoa_nome: pessoaNome ?? null,
+      acao: "apagar_funcionario",
+      alvo_tabela: "funcionarios",
+      alvo_id: editId,
+      detalhes: { nome: data.nome },
+    });
+    toast.success("Apagado");
+    close();
+    refetch();
+  }, [editId, data.nome, refetch, pessoaNome]);
 
   const toggleAcesso = (key: string) => {
     setData((d) => ({ ...d, acessos: d.acessos.includes(key) ? d.acessos.filter((k) => k !== key) : [...d.acessos, key] }));
