@@ -6,6 +6,7 @@ import { cn, formatShortDateTime } from "@/lib/utils";
 import { FormOP } from "./form-op";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import type { OrdemProducao, PedidoProducao, ZonaProducao } from "@/lib/types";
 
 type EditableField =
@@ -84,6 +85,7 @@ export function OPsTab({ ops, pedidos, zonas }: { ops: OrdemProducao[]; pedidos:
       toast.error("Erro ao guardar");
       return;
     }
+    notifyMutation("ordens_producao");
     toast.success("Guardado");
   }
 

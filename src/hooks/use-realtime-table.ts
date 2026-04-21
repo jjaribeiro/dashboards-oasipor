@@ -104,5 +104,19 @@ export function useRealtimeTable<T extends { id: string }>(
     };
   }, [table, refetch, filter?.value]);
 
+  useEffect(() => {
+    function handler(e: Event) {
+      const ev = e as CustomEvent<{ table: string }>;
+      if (ev.detail.table === table) refetch();
+    }
+    window.addEventListener("db-mutation", handler);
+    return () => window.removeEventListener("db-mutation", handler);
+  }, [table, refetch]);
+
   return { items, refetch, setItems };
+}
+
+export function notifyMutation(table: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("db-mutation", { detail: { table } }));
 }

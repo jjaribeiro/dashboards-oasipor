@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useRealtimeTable, notifyMutation } from "@/hooks/use-realtime-table";
 import { useNow } from "@/hooks/use-now";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
@@ -217,7 +217,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
     patchOp(op.id, depois);
     toast.success("OP iniciada", { duration: 8000, action: { label: "Desfazer", onClick: () => revertOp(op.id, antes, op.produto_nome) } });
     supabase.from("ordens_producao").update(depois).eq("id", op.id)
-      .then(({ error }) => { if (error) toast.error("Erro"); });
+      .then(({ error }) => { if (error) toast.error("Erro"); else notifyMutation("ordens_producao"); });
     logAction({ ...actor, acao: "op_iniciar", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, antes } });
   }
 
@@ -234,7 +234,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
     supabase.from("ordens_producao")
       .update({ estado: "pausada", motivo_pausa: motivoLabel, pausada_em: now })
       .eq("id", op.id)
-      .then(({ error }) => { if (error) toast.error("Erro a pausar"); });
+      .then(({ error }) => { if (error) toast.error("Erro a pausar"); else notifyMutation("ordens_producao"); });
 
     // Uma linha por pessoa em pausa (ou 1 linha com o actor se nenhuma equipa)
     const linhas = pessoas.length > 0
@@ -270,7 +270,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
     supabase.from("ordens_producao")
       .update({ estado: "em_curso", motivo_pausa: null, pausada_em: null })
       .eq("id", op.id)
-      .then(({ error }) => { if (error) toast.error("Erro"); });
+      .then(({ error }) => { if (error) toast.error("Erro"); else notifyMutation("ordens_producao"); });
     logAction({ ...actor, acao: "op_retomar", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo } });
   }
 
@@ -283,14 +283,14 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
     supabase.from("ordens_producao")
       .update({ estado: "concluida", fim_real: agora })
       .eq("id", op.id)
-      .then(({ error }) => { if (error) toast.error("Erro"); });
+      .then(({ error }) => { if (error) toast.error("Erro"); else notifyMutation("ordens_producao"); });
     logAction({ ...actor, acao: "op_concluir", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, qtd: op.quantidade_atual, rejeitados: op.quantidade_rejeitada, antes } });
   }
 
   function revertOp(opId: string, antes: Record<string, unknown>, nome: string) {
     patchOp(opId, antes);
     supabase.from("ordens_producao").update(antes).eq("id", opId)
-      .then(({ error }) => { if (error) toast.error(`Erro a reverter: ${error.message}`); });
+      .then(({ error }) => { if (error) toast.error(`Erro a reverter: ${error.message}`); else notifyMutation("ordens_producao"); });
     logAction({ ...actor, acao: "op_reverter", alvoTabela: "ordens_producao", alvoId: opId, zonaId: zona.id, detalhes: { produto: nome, reposto: antes } });
     toast.success(`${nome}: revertido`);
   }
@@ -321,7 +321,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
     supabase.from("ordens_producao")
       .update({ quantidade_rejeitada: novaRej })
       .eq("id", op.id)
-      .then(({ error }) => { if (error) toast.error("Erro"); });
+      .then(({ error }) => { if (error) toast.error("Erro"); else notifyMutation("ordens_producao"); });
 
     supabase.from("producao_rejeitos").insert({
       op_id: op.id,
@@ -366,6 +366,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
       });
       if (error) { toast.error("Erro a registar rotulagem"); return; }
     }
+    notifyMutation("rotulagem_inspecoes");
     toast.success("Rotulagem recebida — qualidade marcada como concluída");
     setRotulagemFeitaIds((prev) => new Set([...prev, op.id]));
     logAction({ ...actor, acao: "rotulagem_recebida", alvoTabela: "rotulagem_inspecoes", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo } });
@@ -391,6 +392,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
         .eq("id", op.id)
         .then(({ error }) => {
           if (error) { toast.error("Erro ao concluir"); return; }
+          notifyMutation("ordens_producao");
           // Criar nova OP no embalamento
           supabase.from("ordens_producao").insert({
             pedido_id: op.pedido_id,
@@ -413,6 +415,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
             ordem_fila: op.ordem_fila,
           }).then(({ error: e2 }) => {
             if (e2) toast.error("Erro a criar OP no embalamento");
+            else notifyMutation("ordens_producao");
           });
         });
       logAction({ ...actor, acao: "op_concluir_auto_embalamento", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, qtd: op.quantidade_atual, antes } });
@@ -431,7 +434,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
     supabase.from("ordens_producao")
       .update({ fase_atual: novaFase })
       .eq("id", op.id)
-      .then(({ error }) => { if (error) toast.error("Erro a atualizar fase"); });
+      .then(({ error }) => { if (error) toast.error("Erro a atualizar fase"); else notifyMutation("ordens_producao"); });
     logAction({ ...actor, acao: "op_fase", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { fase: novaFase, produto: op.produto_codigo } });
   }
 
@@ -459,6 +462,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
       notas: null,
     });
     if (error) { toast.error("Erro a solicitar CQ: " + error.message); return; }
+    notifyMutation("cq_inspecoes");
     toast.success("CQ solicitado — equipa de Qualidade notificada");
     logAction({ ...actor, acao: "cq_solicitar", alvoTabela: "cq_inspecoes", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo } });
   }
@@ -492,7 +496,7 @@ export function OperadorZona({ zona, zonasAgrupadas, initialOPs, initialCiclos, 
         quantidade_atual: 0,
       })
       .eq("id", op.id)
-      .then(({ error }) => { if (error) { console.error("transfer error", error); toast.error(`Erro a transferir: ${error.message}`); } });
+      .then(({ error }) => { if (error) { console.error("transfer error", error); toast.error(`Erro a transferir: ${error.message}`); } else notifyMutation("ordens_producao"); });
     logAction({ ...actor, acao: "op_transferir", alvoTabela: "ordens_producao", alvoId: op.id, zonaId: zona.id, detalhes: { produto: op.produto_codigo, de: zona.id, para: destinoId, qtd_transferida: op.quantidade_atual } });
   }
 
@@ -1580,6 +1584,7 @@ function CicloPanel({ ciclo, onOpen }: { ciclo: EquipamentoCiclo | undefined; on
     await supabase.from("paletes_eo").update({ estado: "em_pre_cond", ciclo_id: cicloData.id, fechada_em: new Date().toISOString() }).in("id", ids);
     const novas = Array.from({ length: 8 }, (_, i) => ({ numero: i + 1, estado: "planeamento" }));
     await supabase.from("paletes_eo").insert(novas);
+    notifyMutation("equipamento_ciclo");
     toast.success("Ciclo submetido para esterilização");
     setPaletesPlaneadas([]);
     setSubmitting(false);

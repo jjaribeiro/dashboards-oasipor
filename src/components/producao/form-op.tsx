@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase/client";
 import { ZONAS_OP, TIPO_LINHA_OPTIONS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import type { OrdemProducao, Produto } from "@/lib/types";
 
 interface FormOPProps {
@@ -106,6 +107,7 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
       const { error } = await supabase.from("ordens_producao").update(patch).eq("id", editItem.id);
       setLoading(false);
       if (error) { console.error("save painel", error); toast.error(`Erro ao guardar: ${error.message}`); return; }
+      notifyMutation("ordens_producao");
       toast.success("OP atualizada");
       onOpenChange(false);
       return;
@@ -150,6 +152,7 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
       toast.error(`Erro ao guardar OP: ${error.message}`);
       return;
     }
+    notifyMutation("ordens_producao");
     toast.success(editItem ? "OP atualizada" : "OP criada");
     onOpenChange(false);
   }
@@ -170,6 +173,7 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
       .eq("id", editItem.id);
     if (error) toast.error("Erro ao concluir");
     else {
+      notifyMutation("ordens_producao");
       toast.success("OP concluída");
       onOpenChange(false);
     }
@@ -181,6 +185,7 @@ export function FormOP({ open, onOpenChange, editItem, defaultZona, painelMode =
     const { error } = await supabase.from("ordens_producao").delete().eq("id", editItem.id);
     if (error) toast.error("Erro ao apagar OP");
     else {
+      notifyMutation("ordens_producao");
       toast.success("OP apagada");
       onOpenChange(false);
     }

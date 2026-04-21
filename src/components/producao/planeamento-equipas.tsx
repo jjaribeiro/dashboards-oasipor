@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useRealtimeTable, notifyMutation } from "@/hooks/use-realtime-table";
 import { cn } from "@/lib/utils";
 import { ZONA_LABEL, AREA_COR, AREA_LABEL } from "@/lib/constants";
 import type { EscalaFuncionario, Funcionario, ZonaId, ZonaProducao } from "@/lib/types";
@@ -103,18 +103,21 @@ export function EquipasTab({ zonas, initialFuncionarios }: Props) {
         .select()
         .single();
       if (error) { toast.error("Erro ao guardar escala"); return; }
+      notifyMutation("escala_funcionario");
       setEscala((prev) => [...prev, inserted as EscalaFuncionario]);
     } else if (removeZonaId) {
       const dataStr = toYYYYMMDD(viewMonday);
       const row = escala.find((e) => e.funcionario_id === funcId && e.zona_id === removeZonaId && e.data === dataStr);
       if (!row) return;
       await supabase.from("escala_funcionario").delete().eq("id", row.id);
+      notifyMutation("escala_funcionario");
       setEscala((prev) => prev.filter((e) => e.id !== row.id));
     } else {
       // clear all for this func in this week
       const dataStr = toYYYYMMDD(viewMonday);
       const toDelete = escala.filter((e) => e.funcionario_id === funcId && e.data === dataStr);
       await supabase.from("escala_funcionario").delete().in("id", toDelete.map((e) => e.id));
+      notifyMutation("escala_funcionario");
       setEscala((prev) => prev.filter((e) => !(e.funcionario_id === funcId && e.data === dataStr)));
     }
   }
@@ -145,6 +148,8 @@ export function EquipasTab({ zonas, initialFuncionarios }: Props) {
     if (error) {
       toast.error("Erro a mover");
       patchFuncionario(id, { zona_atual: antes.zona_atual, zonas_atuais: antes.zonas_atuais as Funcionario["zonas_atuais"] });
+    } else {
+      notifyMutation("funcionarios");
     }
   }
 
@@ -341,6 +346,7 @@ function ZonaRow({
     setRespLocal(v);
     const { error } = await supabase.from("zonas_producao").update({ responsavel: v }).eq("id", zona.id);
     if (error) { setRespLocal(anterior); toast.error("Erro ao guardar responsável"); }
+    else { notifyMutation("zonas_producao"); }
   }
 
   function handleDrop(e: React.DragEvent) {

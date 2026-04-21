@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useCallback } from "react";
-import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useRealtimeTable, notifyMutation } from "@/hooks/use-realtime-table";
 import { useAutoMoveCiclos } from "@/hooks/use-auto-move-ciclos";
 import { useDelayAlert } from "@/hooks/use-delay-alert";
 import { supabase } from "@/lib/supabase/client";
@@ -110,7 +110,7 @@ export function ProducaoGestaoGrid({ initialZonas, initialOPs, initialCiclos, in
     patchCiclo(cicloId, { zona_id: novaZonaId as EquipamentoCiclo["zona_id"] });
     toast.success("Ciclo movido");
     supabase.from("equipamento_ciclo").update({ zona_id: novaZonaId }).eq("id", cicloId)
-      .then(({ error }) => { if (error) toast.error("Erro ao mover ciclo"); });
+      .then(({ error }) => { if (error) toast.error("Erro ao mover ciclo"); else notifyMutation("equipamento_ciclo"); });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
