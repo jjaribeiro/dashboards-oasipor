@@ -29,11 +29,15 @@ const NUM_PALETES = 8;
 
 interface Props {
   ops: OrdemProducao[];
+  setOps?: React.Dispatch<React.SetStateAction<OrdemProducao[]>>;
   initialPaletes: PaleteEO[];
   initialProdutos: Produto[];
 }
 
-export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props) {
+export function PlaneamentoEOTab({ ops, setOps, initialPaletes, initialProdutos }: Props) {
+  const patchOp = useCallback((id: string, patch: Partial<OrdemProducao>) => {
+    setOps?.((prev) => prev.map((o) => o.id === id ? { ...o, ...patch } : o));
+  }, [setOps]);
   const { items: paletes, refetch: refetchPaletes } = useRealtimeTable<PaleteEO>("paletes_eo", initialPaletes, { orderBy: "numero", ascending: true });
   const { items: produtos } = useRealtimeTable<Produto>("produtos", initialProdutos, { orderBy: "referencia", ascending: true });
 
@@ -143,6 +147,10 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     const info = disponiveis.find((d) => d.op.id === opId);
     const produtoTipoCaixa = info?.tipoCaixa ?? null;
 
+    // Optimistic: update local state immediately
+    patchOp(opId, { palete_eo_id: paleteId, num_caixas: numCaixas });
+    toast.success(`OP movida para palete ${palete.numero} (${numCaixas}cx)`);
+
     const { error: eOp } = await supabase.from("ordens_producao").update({
       palete_eo_id: paleteId,
       num_caixas: numCaixas,
@@ -154,8 +162,7 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
       await supabase.from("paletes_eo").update({ tipo_caixa: produtoTipoCaixa }).eq("id", paleteId);
       notifyMutation("paletes_eo");
     }
-    toast.success(`OP movida para palete ${palete.numero} (${numCaixas}cx)`);
-  }, [paletes, disponiveis]);
+  }, [paletes, disponiveis, patchOp]);
 
   const assignOpToPalete = useCallback(async (opId: string, paleteId: string) => {
     const opRow = ops.find((o) => o.id === opId);
@@ -197,23 +204,29 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
   }, [ops, paletes, opsPorPalete, disponiveis, confirmAssign]);
 
   const removerDaPalete = useCallback(async (opId: string) => {
+    patchOp(opId, { palete_eo_id: null });
+    toast.success("Removido da palete");
     const { error } = await supabase.from("ordens_producao").update({ palete_eo_id: null }).eq("id", opId);
     if (error) toast.error("Erro a remover");
-    else { notifyMutation("ordens_producao"); toast.success("Removido da palete"); }
-  }, []);
+    else notifyMutation("ordens_producao");
+  }, [patchOp]);
 
   const limparPalete = useCallback(async (paleteId: string) => {
     const items = opsPorPalete.get(paleteId) ?? [];
     if (items.length === 0) return;
     if (!confirm(`Remover ${items.length} OP${items.length === 1 ? "" : "s"} da palete?`)) return;
-    for (const it of items) {
-      await supabase.from("ordens_producao").update({ palete_eo_id: null }).eq("id", it.op.id);
-    }
-    notifyMutation("ordens_producao");
-    await supabase.from("paletes_eo").update({ tipo_caixa: null }).eq("id", paleteId);
-    notifyMutation("paletes_eo");
+    // Optimistic: atualizar local imediatamente
+    const ids = items.map((it) => it.op.id);
+    for (const id of ids) patchOp(id, { palete_eo_id: null });
     toast.success("Palete limpa");
-  }, [opsPorPalete]);
+    // Escrita em paralelo num único query
+    await Promise.all([
+      supabase.from("ordens_producao").update({ palete_eo_id: null }).in("id", ids),
+      supabase.from("paletes_eo").update({ tipo_caixa: null }).eq("id", paleteId),
+    ]);
+    notifyMutation("ordens_producao");
+    notifyMutation("paletes_eo");
+  }, [opsPorPalete, patchOp]);
 
   const fecharCiclo = useCallback(async (preCond: "pre_cond_1" | "pre_cond_2") => {
     const paletesComConteudo = paletesPlaneamento.filter((p) => (opsPorPalete.get(p.id) ?? []).length > 0);
