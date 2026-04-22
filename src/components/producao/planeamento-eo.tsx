@@ -131,6 +131,32 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [selectedPreCond, setSelectedPreCond] = useState<"pre_cond_1" | "pre_cond_2">("pre_cond_1");
 
+  const [pendingAssign, setPendingAssign] = useState<{
+    opId: string; paleteId: string; paleteNum: number;
+    opCaixas: number; espacoLivre: number; cap: number; usadas: number;
+    tipoCaixa: TipoCaixa | null;
+  } | null>(null);
+
+  const confirmAssign = useCallback(async (opId: string, paleteId: string, numCaixas: number) => {
+    const palete = paletes.find((p) => p.id === paleteId);
+    if (!palete) return;
+    const info = disponiveis.find((d) => d.op.id === opId);
+    const produtoTipoCaixa = info?.tipoCaixa ?? null;
+
+    const { error: eOp } = await supabase.from("ordens_producao").update({
+      palete_eo_id: paleteId,
+      num_caixas: numCaixas,
+    }).eq("id", opId);
+    if (eOp) { toast.error("Erro a atribuir OP"); return; }
+    notifyMutation("ordens_producao");
+
+    if (!palete.tipo_caixa && produtoTipoCaixa) {
+      await supabase.from("paletes_eo").update({ tipo_caixa: produtoTipoCaixa }).eq("id", paleteId);
+      notifyMutation("paletes_eo");
+    }
+    toast.success(`OP movida para palete ${palete.numero} (${numCaixas}cx)`);
+  }, [paletes, disponiveis]);
+
   const assignOpToPalete = useCallback(async (opId: string, paleteId: string) => {
     const opRow = ops.find((o) => o.id === opId);
     const palete = paletes.find((p) => p.id === paleteId);
@@ -147,28 +173,28 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
     // Calcular caixas usadas na palete
     const current = opsPorPalete.get(paleteId) ?? [];
     const usadas = current.reduce((a, c) => a + (c.numCaixas || 0), 0);
-    const novoTotal = usadas + (info?.numCaixas ?? 0);
+    const opCaixas = info?.numCaixas ?? 0;
+    const novoTotal = usadas + opCaixas;
     const cap = produtoTipoCaixa ? CAPACIDADE[produtoTipoCaixa] : 0;
+
+    // Se excede capacidade → abrir dialogo para o utilizador decidir
     if (produtoTipoCaixa && novoTotal > cap) {
-      const excesso = novoTotal - cap;
-      if (!confirm(`Palete ${palete.numero} excede capacidade (${novoTotal}/${cap}). Excesso: ${excesso} caixas. Continuar?`)) return;
+      const espacoLivre = Math.max(0, cap - usadas);
+      setPendingAssign({
+        opId, paleteId,
+        paleteNum: palete.numero,
+        opCaixas,
+        espacoLivre,
+        cap,
+        usadas,
+        tipoCaixa: produtoTipoCaixa,
+      });
+      return;
     }
 
-    // Update OP
-    const { error: eOp } = await supabase.from("ordens_producao").update({
-      palete_eo_id: paleteId,
-      num_caixas: info?.numCaixas ?? null,
-    }).eq("id", opId);
-    if (eOp) { toast.error("Erro a atribuir OP"); return; }
-    notifyMutation("ordens_producao");
-
-    // Definir tipo_caixa da palete se ainda não tinha
-    if (!palete.tipo_caixa && produtoTipoCaixa) {
-      await supabase.from("paletes_eo").update({ tipo_caixa: produtoTipoCaixa }).eq("id", paleteId);
-      notifyMutation("paletes_eo");
-    }
-    toast.success(`OP movida para palete ${palete.numero}`);
-  }, [ops, paletes, opsPorPalete, disponiveis]);
+    // Cabe tudo: atribuição direta
+    await confirmAssign(opId, paleteId, opCaixas);
+  }, [ops, paletes, opsPorPalete, disponiveis, confirmAssign]);
 
   const removerDaPalete = useCallback(async (opId: string) => {
     const { error } = await supabase.from("ordens_producao").update({ palete_eo_id: null }).eq("id", opId);
@@ -375,6 +401,84 @@ export function PlaneamentoEOTab({ ops, initialPaletes, initialProdutos }: Props
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {pendingAssign && (
+        <AllocateCaixasDialog
+          state={pendingAssign}
+          onCancel={() => setPendingAssign(null)}
+          onConfirm={async (numCaixas) => {
+            const s = pendingAssign;
+            setPendingAssign(null);
+            await confirmAssign(s.opId, s.paleteId, numCaixas);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function AllocateCaixasDialog({ state, onCancel, onConfirm }: {
+  state: { opId: string; paleteId: string; paleteNum: number; opCaixas: number; espacoLivre: number; cap: number; usadas: number; tipoCaixa: TipoCaixa | null };
+  onCancel: () => void;
+  onConfirm: (n: number) => void;
+}) {
+  const [value, setValue] = useState(state.espacoLivre > 0 ? state.espacoLivre : state.opCaixas);
+  const restante = state.opCaixas - value;
+  const novoTotalPalete = state.usadas + value;
+  const excedePalete = novoTotalPalete > state.cap;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-base font-black text-slate-900">Palete {state.paleteNum} — espaço insuficiente</h3>
+        <p className="mt-1 text-xs font-bold text-slate-500">
+          Capacidade {state.cap}cx · Usadas {state.usadas}cx · Livre <span className="text-slate-900">{state.espacoLivre}cx</span>
+        </p>
+        <p className="mt-1 text-xs font-bold text-slate-500">
+          OP tem <span className="text-slate-900">{state.opCaixas}cx</span> para alocar
+        </p>
+
+        <label className="mt-4 block text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+          Quantas caixas alocar aqui?
+        </label>
+        <input
+          type="number"
+          min={1}
+          max={state.opCaixas}
+          value={value}
+          onChange={(e) => setValue(Math.max(1, Math.min(state.opCaixas, Number(e.target.value) || 1)))}
+          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-2xl font-black text-slate-900 focus:border-blue-400 focus:outline-none"
+          autoFocus
+        />
+
+        <div className="mt-3 space-y-1 text-xs font-bold">
+          <p className={cn("flex justify-between", excedePalete ? "text-amber-700" : "text-slate-600")}>
+            <span>Nova ocupação palete:</span>
+            <span>{novoTotalPalete}/{state.cap}cx {excedePalete && "⚠ excede"}</span>
+          </p>
+          {restante > 0 && (
+            <p className="flex justify-between text-slate-600">
+              <span>Restam na OP (cria outra palete):</span>
+              <span className="text-slate-900">{restante}cx</span>
+            </p>
+          )}
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <button onClick={onCancel} className="flex-1 rounded-lg border border-slate-200 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">Cancelar</button>
+          <button
+            onClick={() => setValue(state.espacoLivre)}
+            disabled={state.espacoLivre === 0}
+            className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-200 disabled:opacity-40"
+            title="Usar o espaço livre"
+          >Livre ({state.espacoLivre})</button>
+          <button
+            onClick={() => onConfirm(value)}
+            disabled={value < 1}
+            className="flex-1 rounded-lg bg-slate-800 py-2 text-xs font-extrabold text-white hover:bg-slate-700 disabled:opacity-40"
+          >Alocar {value}cx</button>
         </div>
       </div>
     </div>
