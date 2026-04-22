@@ -30,6 +30,7 @@ export function EquipaPresencaPanel({ zonaId, equipa }: Props) {
     supabase
       .from("funcionario_presencas")
       .select("*")
+      .eq("zona_id", zonaId)
       .gte("criado_em", hoje.toISOString())
       .order("criado_em", { ascending: false })
       .then(({ data }) => { if (data) setPresencas(data as FuncionarioPresenca[]); });
@@ -40,6 +41,7 @@ export function EquipaPresencaPanel({ zonaId, equipa }: Props) {
         setPresencas((prev) => {
           if (payload.eventType === "INSERT") {
             const row = payload.new as FuncionarioPresenca;
+            if (row.zona_id !== zonaId) return prev;
             return [row, ...prev];
           }
           if (payload.eventType === "DELETE") {

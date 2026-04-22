@@ -289,22 +289,22 @@ function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorD
           const p = r.pedido;
           const hoje = isSameDay(r.dia, new Date());
           return (
-            <li key={`p-${p.id}-${idx}`} className="relative flex min-h-0 flex-col justify-center gap-1 overflow-hidden rounded-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-              <div className="flex w-full items-center gap-2">
-                <span className={cn("rounded border px-2 py-0.5 text-sm font-extrabold shrink-0", PRIORIDADE_OP_COR[p.prioridade])}>{PRIORIDADE_OP_LABEL[p.prioridade]}</span>
-                <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-sm font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {p.produto_codigo ?? "—"}</span>
-                <span className="truncate text-lg font-black text-slate-900">{p.produto_nome}</span>
-                <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-sm font-extrabold text-slate-700 shrink-0">{p.quantidade_alvo}un</span>
+            <li key={`p-${p.id}-${idx}`} className="flex min-h-0 flex-col justify-center gap-1 overflow-hidden rounded-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
+              <div className="flex w-full flex-wrap items-center gap-1.5">
+                <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-sm font-extrabold text-white shrink-0" title="Referência do produto">{p.produto_codigo ?? "—"}</span>
+                <span className={cn("rounded border px-2 py-0.5 text-xs font-extrabold shrink-0 capitalize", PRIORIDADE_OP_COR[p.prioridade])}>{PRIORIDADE_OP_LABEL[p.prioridade]}</span>
+                {p.precisa_rotulagem && <span className="rounded bg-lime-100 px-2 py-0.5 text-xs font-extrabold text-lime-700 shrink-0">🏷 rotul.</span>}
+                <span className={cn("ml-auto rounded px-2 py-0.5 text-xs font-black uppercase tracking-wider shrink-0", hoje ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600")}>
+                  {DIAS_LABEL[r.diaIdx]} {fmtDate(r.dia)}{hoje && " · HOJE"}
+                </span>
               </div>
-              <div className="flex w-full items-center gap-2 text-sm font-bold">
-                {p.precisa_rotulagem && <span className="rounded bg-lime-100 px-2 py-0.5 font-extrabold text-lime-700 shrink-0">🏷 rotul.</span>}
-                {p.ficha_producao && <span className="rounded bg-indigo-100 px-2 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {p.ficha_producao}</span>}
-                {p.numero && <span className="rounded bg-sky-100 px-2 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {p.numero}</span>}
+              <p className="truncate text-xl font-black text-slate-900 leading-tight">{p.produto_nome}</p>
+              <p className="truncate text-sm font-bold text-slate-500">{p.cliente ?? "—"}</p>
+              <div className="flex w-full flex-wrap items-center gap-1.5 text-xs font-bold">
+                {p.ficha_producao && <span className="rounded bg-indigo-100 px-1.5 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {p.ficha_producao}</span>}
+                {p.numero && <span className="rounded bg-sky-100 px-1.5 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {p.numero}</span>}
+                <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 font-extrabold text-slate-700 shrink-0">{p.quantidade_alvo} un</span>
               </div>
-              <span className="truncate text-sm font-bold text-slate-500 pr-24">{p.cliente ?? "—"}</span>
-              <span className={cn("absolute bottom-2 right-3 rounded px-2 py-0.5 text-xs font-black uppercase tracking-wider", hoje ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600")}>
-                {DIAS_LABEL[r.diaIdx]} {fmtDate(r.dia)}{hoje && " · HOJE"}
-              </span>
             </li>
           );
         })}
@@ -357,26 +357,25 @@ function RotulagemCarousel({ ops, pedidoPorId }: { ops: OrdemProducao[]; pedidoP
           const ped = op.pedido_id ? pedidoPorId.get(op.pedido_id) : null;
           return (
             <li key={op.id} className="flex min-h-0 flex-col justify-center gap-1 overflow-hidden rounded-lg border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-              <div className="flex w-full items-center gap-2">
-                <span className={cn("rounded border px-2 py-0.5 text-sm font-extrabold shrink-0", ESTADO_OP_COR[op.estado] ?? "bg-slate-100 text-slate-700 border-slate-200")}>
+              <div className="flex w-full flex-wrap items-center gap-1.5">
+                <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-sm font-extrabold text-white shrink-0" title="Referência do produto">{op.produto_codigo ?? "—"}</span>
+                <span className={cn("rounded border px-2 py-0.5 text-xs font-extrabold shrink-0", ESTADO_OP_COR[op.estado] ?? "bg-slate-100 text-slate-700 border-slate-200")}>
                   {ESTADO_OP_LABEL[op.estado] ?? op.estado}
                 </span>
-                <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-sm font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {op.produto_codigo ?? "—"}</span>
-                <span className="truncate text-lg font-black text-slate-900">{op.produto_nome}</span>
-                <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-sm font-extrabold text-slate-700 shrink-0">{op.quantidade_atual}/{op.quantidade_alvo}</span>
-              </div>
-              <div className="flex w-full items-center gap-2 text-sm font-bold">
                 {op.lote ? (
-                  <span className="rounded bg-lime-100 px-2 py-0.5 font-mono font-extrabold text-lime-700 shrink-0" title="Lote">LT {op.lote}</span>
+                  <span className="rounded bg-lime-100 px-2 py-0.5 font-mono text-xs font-extrabold text-lime-700 shrink-0" title="Lote">LT {op.lote}</span>
                 ) : (
-                  <span className="rounded bg-amber-100 px-2 py-0.5 font-extrabold text-amber-700 shrink-0">sem lote</span>
+                  <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-extrabold text-amber-700 shrink-0">sem lote</span>
                 )}
-                {ped?.ficha_producao && <span className="rounded bg-indigo-100 px-2 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {ped.ficha_producao}</span>}
-                {ped?.numero && <span className="rounded bg-sky-100 px-2 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {ped.numero}</span>}
-                {op.numero && <span className="rounded bg-violet-100 px-2 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {op.numero}</span>}
+                <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-xs font-extrabold text-slate-700 shrink-0">{op.quantidade_atual}/{op.quantidade_alvo}</span>
               </div>
-              <span className="truncate text-sm font-bold text-slate-600">{ZONA_LABEL[op.zona_id] ?? op.zona_id}</span>
-              <span className="truncate text-sm font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"}</span>
+              <p className="truncate text-xl font-black text-slate-900 leading-tight">{op.produto_nome}</p>
+              <p className="truncate text-sm font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"} · {ZONA_LABEL[op.zona_id] ?? op.zona_id}</p>
+              <div className="flex w-full flex-wrap items-center gap-1.5 text-xs font-bold">
+                {ped?.ficha_producao && <span className="rounded bg-indigo-100 px-1.5 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {ped.ficha_producao}</span>}
+                {ped?.numero && <span className="rounded bg-sky-100 px-1.5 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {ped.numero}</span>}
+                {op.numero && <span className="rounded bg-violet-100 px-1.5 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {op.numero}</span>}
+              </div>
             </li>
           );
         })}
@@ -437,24 +436,23 @@ function CqManutencaoCarousel({ cqSolicitado, manutencaoPedidos, pedidoPorId, on
             return (
               <li key={`cq-${inspecao.id}-${idx}`}>
                 <button onClick={() => onClickCq({ op, pendente: inspecao })} className="flex h-full w-full min-h-0 flex-col justify-center gap-1 overflow-hidden rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-left shadow-sm hover:border-sky-400 hover:bg-sky-100">
-                  <div className="flex w-full items-center gap-2">
-                    <span className="rounded bg-sky-600 px-2 py-0.5 text-sm font-extrabold text-white shrink-0">CQ SOLICITADO</span>
-                    <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-sm font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {op.produto_codigo ?? "—"}</span>
-                    <span className="truncate text-lg font-black text-slate-900">{op.produto_nome}</span>
-                    <span className="ml-auto text-sm font-bold text-slate-500 shrink-0" suppressHydrationWarning>{new Date(inspecao.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
-                  </div>
-                  <div className="flex w-full items-center gap-2 text-sm font-bold">
+                  <div className="flex w-full flex-wrap items-center gap-1.5">
+                    <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-sm font-extrabold text-white shrink-0" title="Referência do produto">{op.produto_codigo ?? "—"}</span>
+                    <span className="rounded bg-sky-600 px-2 py-0.5 text-xs font-extrabold text-white shrink-0">CQ SOLICITADO</span>
                     {op.lote ? (
-                      <span className="rounded bg-lime-100 px-2 py-0.5 font-mono font-extrabold text-lime-700 shrink-0" title="Lote">LT {op.lote}</span>
+                      <span className="rounded bg-lime-100 px-2 py-0.5 font-mono text-xs font-extrabold text-lime-700 shrink-0" title="Lote">LT {op.lote}</span>
                     ) : (
-                      <span className="rounded bg-amber-100 px-2 py-0.5 font-extrabold text-amber-700 shrink-0">sem lote</span>
+                      <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-extrabold text-amber-700 shrink-0">sem lote</span>
                     )}
-                    {ped?.ficha_producao && <span className="rounded bg-indigo-100 px-2 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {ped.ficha_producao}</span>}
-                    {ped?.numero && <span className="rounded bg-sky-100 px-2 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {ped.numero}</span>}
-                    {op.numero && <span className="rounded bg-violet-100 px-2 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {op.numero}</span>}
+                    <span className="ml-auto text-xs font-bold text-slate-500 shrink-0" suppressHydrationWarning>{new Date(inspecao.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
                   </div>
-                  <span className="truncate text-sm font-bold text-slate-600">{ZONA_LABEL[op.zona_id] ?? op.zona_id}</span>
-                  <span className="truncate text-sm font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"}</span>
+                  <p className="truncate text-xl font-black text-slate-900 leading-tight">{op.produto_nome}</p>
+                  <p className="truncate text-sm font-bold text-slate-500">{op.cliente ?? ped?.cliente ?? "—"} · {ZONA_LABEL[op.zona_id] ?? op.zona_id}</p>
+                  <div className="flex w-full flex-wrap items-center gap-1.5 text-xs font-bold">
+                    {ped?.ficha_producao && <span className="rounded bg-indigo-100 px-1.5 py-0.5 font-mono font-extrabold text-indigo-700 shrink-0" title="Ficha de Produção">FP {ped.ficha_producao}</span>}
+                    {ped?.numero && <span className="rounded bg-sky-100 px-1.5 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {ped.numero}</span>}
+                    {op.numero && <span className="rounded bg-violet-100 px-1.5 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {op.numero}</span>}
+                  </div>
                 </button>
               </li>
             );
@@ -463,19 +461,18 @@ function CqManutencaoCarousel({ cqSolicitado, manutencaoPedidos, pedidoPorId, on
           const det = (log.detalhes as Record<string, string> | null) ?? null;
           return (
             <li key={`manu-${log.id}-${idx}`} className="flex min-h-0 flex-col justify-center gap-1 overflow-hidden rounded-lg border border-orange-200 bg-orange-50 px-4 py-2.5 shadow-sm">
-              <div className="flex w-full items-center gap-2">
-                <span className="rounded bg-orange-600 px-2 py-0.5 text-sm font-extrabold text-white shrink-0">🔧 MANUTENÇÃO</span>
-                {det?.produto_codigo && <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-sm font-extrabold text-slate-700 shrink-0" title="Referência do produto">REF {det.produto_codigo}</span>}
-                <span className="truncate text-lg font-black text-slate-900">{det?.produto ?? "—"}</span>
-                <span className="ml-auto text-sm font-bold text-slate-500 shrink-0" suppressHydrationWarning>{new Date(log.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
+              <div className="flex w-full flex-wrap items-center gap-1.5">
+                {det?.produto_codigo && <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-sm font-extrabold text-white shrink-0" title="Referência do produto">{det.produto_codigo}</span>}
+                <span className="rounded bg-orange-600 px-2 py-0.5 text-xs font-extrabold text-white shrink-0">🔧 MANUTENÇÃO</span>
+                {det?.lote && <span className="rounded bg-lime-100 px-2 py-0.5 font-mono text-xs font-extrabold text-lime-700 shrink-0" title="Lote">LT {det.lote}</span>}
+                <span className="ml-auto text-xs font-bold text-slate-500 shrink-0" suppressHydrationWarning>{new Date(log.created_at).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}</span>
               </div>
-              <div className="flex w-full items-center gap-2 text-sm font-bold">
-                {det?.lote && <span className="rounded bg-lime-100 px-2 py-0.5 font-mono font-extrabold text-lime-700 shrink-0" title="Lote">LT {det.lote}</span>}
-                {det?.pp_numero && <span className="rounded bg-sky-100 px-2 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {det.pp_numero}</span>}
-                {det?.op_numero && <span className="rounded bg-violet-100 px-2 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {det.op_numero}</span>}
+              <p className="truncate text-xl font-black text-slate-900 leading-tight">{det?.produto ?? "—"}</p>
+              <p className="truncate text-sm font-bold text-slate-500">{log.pessoa_nome ?? "—"} · {log.zona_id ? (ZONA_LABEL[log.zona_id as keyof typeof ZONA_LABEL] ?? log.zona_id) : "—"}</p>
+              <div className="flex w-full flex-wrap items-center gap-1.5 text-xs font-bold">
+                {det?.pp_numero && <span className="rounded bg-sky-100 px-1.5 py-0.5 font-mono font-extrabold text-sky-700 shrink-0" title="Pedido de Produção">PP {det.pp_numero}</span>}
+                {det?.op_numero && <span className="rounded bg-violet-100 px-1.5 py-0.5 font-mono font-extrabold text-violet-700 shrink-0" title="Ordem de Produção">OP {det.op_numero}</span>}
               </div>
-              <span className="truncate text-sm font-bold text-slate-600">{log.zona_id ? (ZONA_LABEL[log.zona_id as keyof typeof ZONA_LABEL] ?? log.zona_id) : "—"}</span>
-              <span className="truncate text-sm font-bold text-slate-500">{log.pessoa_nome ?? "—"}</span>
             </li>
           );
         })}
