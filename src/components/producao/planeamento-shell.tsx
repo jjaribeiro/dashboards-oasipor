@@ -67,7 +67,7 @@ export function PlaneamentoShell({ initialZonas, initialPedidos, initialOPs, ini
   // Realtime: cada tabela mantém-se sincronizada via WebSocket; fallback de polling 60s embebido no hook
   const { items: zonas } = useRealtimeTable<ZonaProducao>("zonas_producao", initialZonas, { orderBy: "ordem", ascending: true });
   const { items: pedidos } = useRealtimeTable<PedidoProducao>("pedidos_producao", initialPedidos, { orderBy: "updated_at", ascending: false });
-  const { items: ops } = useRealtimeTable<OrdemProducao>("ordens_producao", initialOPs, { orderBy: "updated_at", ascending: false });
+  const { items: ops, setItems: setOps } = useRealtimeTable<OrdemProducao>("ordens_producao", initialOPs, { orderBy: "updated_at", ascending: false });
   const { items: audit } = useRealtimeTable<AuditLog>("audit_log", initialAudit, { orderBy: "created_at", ascending: false });
   const { items: rejeitos } = useRealtimeTable<ProducaoRejeito>("producao_rejeitos", initialRejeitos, { orderBy: "created_at", ascending: false });
   const { items: pausas } = useRealtimeTable<ProducaoPausa>("producao_pausas", initialPausas, { orderBy: "created_at", ascending: false });
@@ -153,7 +153,7 @@ export function PlaneamentoShell({ initialZonas, initialPedidos, initialOPs, ini
         {tabResolved && tab === "pedidos" && <PedidosTab pedidos={pedidos} ops={ops} zonas={zonas} />}
         {tabResolved && tab === "ops" && <OPsTab ops={ops} pedidos={pedidos} zonas={zonas} />}
         {tabResolved && tab === "equipas" && <EquipasTab zonas={zonas} initialFuncionarios={initialFuncionarios} />}
-        {tabResolved && tab === "eo" && <PlaneamentoEOTab ops={ops} initialPaletes={initialPaletes} initialProdutos={initialProdutos} />}
+        {tabResolved && tab === "eo" && <PlaneamentoEOTab ops={ops} setOps={setOps} initialPaletes={initialPaletes} initialProdutos={initialProdutos} />}
       </div>
     </div>
   );
