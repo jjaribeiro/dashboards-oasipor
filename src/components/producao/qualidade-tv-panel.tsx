@@ -54,8 +54,8 @@ export function QualidadeTvPanel({ ops: initialOps, pedidos: initialPedidos, ini
   const { session } = usePessoaSession();
   const { items: ops } = useRealtimeTable<OrdemProducao>("ordens_producao", initialOps, { orderBy: "updated_at", ascending: false });
   const { items: pedidos } = useRealtimeTable<PedidoProducao>("pedidos_producao", initialPedidos, { orderBy: "updated_at", ascending: false });
-  const { items: rotulagem } = useRealtimeTable<RotulagemInspecao>("rotulagem_inspecoes", initialRotulagem, { orderBy: "created_at", ascending: false });
-  const { items: cq } = useRealtimeTable<CqInspecao>("cq_inspecoes", initialCq, { orderBy: "created_at", ascending: false });
+  const { items: rotulagem, setItems: setRotulagem } = useRealtimeTable<RotulagemInspecao>("rotulagem_inspecoes", initialRotulagem, { orderBy: "created_at", ascending: false });
+  const { items: cq, setItems: setCq } = useRealtimeTable<CqInspecao>("cq_inspecoes", initialCq, { orderBy: "created_at", ascending: false });
   const { items: ncs } = useRealtimeTable<NaoConformidade>("nao_conformidades", initialNcs, { orderBy: "created_at", ascending: false });
 
   // Pedidos de manutenção recentes (audit_log com acao=manutencao_solicitada, últimas 24h)
@@ -207,8 +207,8 @@ export function QualidadeTvPanel({ ops: initialOps, pedidos: initialPedidos, ini
         </Section>
       </div>
 
-      {rotInspecao && <FormRotulagem op={rotInspecao} onClose={() => setRotInspecao(null)} pessoa={session} />}
-      {cqInspecao && <FormCq op={cqInspecao.op} pendente={cqInspecao.pendente} onClose={() => setCqInspecao(null)} pessoa={session} />}
+      {rotInspecao && <FormRotulagem op={rotInspecao} onClose={() => setRotInspecao(null)} pessoa={session} setItems={setRotulagem} />}
+      {cqInspecao && <FormCq op={cqInspecao.op} pendente={cqInspecao.pendente} onClose={() => setCqInspecao(null)} pessoa={session} setItems={setCq} />}
     </div>
   );
 }
@@ -535,7 +535,7 @@ const CHECKS_ROT: Array<{ id: keyof Pick<RotulagemInspecao, "check_lote" | "chec
   { id: "check_quantidade", label: "Quantidade confere" },
 ];
 
-function FormRotulagem({ op, onClose, pessoa }: { op: OrdemProducao; onClose: () => void; pessoa: { pessoaId: string; pessoaNome: string } | null }) {
+function FormRotulagem({ op, onClose, pessoa, setItems }: { op: OrdemProducao; onClose: () => void; pessoa: { pessoaId: string; pessoaNome: string } | null; setItems?: React.Dispatch<React.SetStateAction<RotulagemInspecao[]>> }) {
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [lote, setLote] = useState(op.lote ?? "");
   const [qtdRee, setQtdRee] = useState(0);
@@ -549,7 +549,7 @@ function FormRotulagem({ op, onClose, pessoa }: { op: OrdemProducao; onClose: ()
 
   async function gravar() {
     setSaving(true);
-    const { error } = await supabase.from("rotulagem_inspecoes").insert({
+    const payload = {
       op_id: op.id,
       pedido_id: op.pedido_id,
       lote: lote || null,
@@ -564,9 +564,11 @@ function FormRotulagem({ op, onClose, pessoa }: { op: OrdemProducao; onClose: ()
       pessoa_id: pessoa?.pessoaId ?? null,
       pessoa_nome: pessoa?.pessoaNome ?? null,
       notas: notas || null,
-    });
+    };
+    const { data, error } = await supabase.from("rotulagem_inspecoes").insert(payload).select().single();
     setSaving(false);
     if (error) { toast.error(error.message); return; }
+    if (data) setItems?.((prev) => [data as RotulagemInspecao, ...prev.filter((r) => r.id !== (data as RotulagemInspecao).id)]);
     notifyMutation("rotulagem_inspecoes");
     await logAction({ pessoaId: pessoa?.pessoaId ?? null, pessoaNome: pessoa?.pessoaNome ?? null, acao: "rotulagem_inspecao", alvoTabela: "rotulagem_inspecoes", alvoId: op.id, detalhes: { resultado, qtdRee, qtdDesc } });
     toast.success("Inspeção registada");
@@ -634,7 +636,7 @@ const CHECKLIST_CQ: CqChecklistItem[] = [
   { descricao: "Embalagem primária OK", ok: false },
 ];
 
-function FormCq({ op, pendente, onClose, pessoa }: { op: OrdemProducao; pendente: CqInspecao | null; onClose: () => void; pessoa: { pessoaId: string; pessoaNome: string } | null }) {
+function FormCq({ op, pendente, onClose, pessoa, setItems }: { op: OrdemProducao; pendente: CqInspecao | null; onClose: () => void; pessoa: { pessoaId: string; pessoaNome: string } | null; setItems?: React.Dispatch<React.SetStateAction<CqInspecao[]>> }) {
   const [checklist, setChecklist] = useState<CqChecklistItem[]>(
     (pendente?.checklist && pendente.checklist.length > 0 ? pendente.checklist : CHECKLIST_CQ).map((c) => ({ ...c, ok: false }))
   );
@@ -659,9 +661,13 @@ function FormCq({ op, pendente, onClose, pessoa }: { op: OrdemProducao; pendente
     };
     let error;
     if (pendente) {
+      // Optimistic
+      setItems?.((prev) => prev.map((i) => i.id === pendente.id ? { ...i, ...(payload as unknown as Partial<CqInspecao>) } : i));
       ({ error } = await supabase.from("cq_inspecoes").update(payload).eq("id", pendente.id));
     } else {
-      ({ error } = await supabase.from("cq_inspecoes").insert({ op_id: op.id, pedido_id: op.pedido_id, produto_codigo: op.produto_codigo, ...payload }));
+      const res = await supabase.from("cq_inspecoes").insert({ op_id: op.id, pedido_id: op.pedido_id, produto_codigo: op.produto_codigo, ...payload }).select().single();
+      error = res.error;
+      if (res.data) setItems?.((prev) => [res.data as CqInspecao, ...prev.filter((i) => i.id !== (res.data as CqInspecao).id)]);
     }
     setSaving(false);
     if (error) { toast.error(error.message); return; }

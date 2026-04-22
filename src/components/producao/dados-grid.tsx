@@ -17,8 +17,8 @@ interface Props {
 }
 
 export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) {
-  const { items: funcionarios, refetch: refetchFunc } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
-  const { items: produtos, refetch: refetchProd } = useRealtimeTable<Produto>("produtos", initialProdutos, { orderBy: "referencia" });
+  const { items: funcionarios, refetch: refetchFunc, setItems: setFuncionarios } = useRealtimeTable<Funcionario>("funcionarios", initialFuncionarios, { orderBy: "nome" });
+  const { items: produtos, refetch: refetchProd, setItems: setProdutos } = useRealtimeTable<Produto>("produtos", initialProdutos, { orderBy: "referencia" });
   const [tab, setTab] = useState<Tab>("funcionarios");
   const { session } = usePessoaSession();
   const [pinInput, setPinInput] = useState("");
@@ -120,8 +120,8 @@ export function DadosGrid({ initialFuncionarios, initialProdutos = [] }: Props) 
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {tab === "funcionarios" && <GridFuncionarios items={funcionarios} refetch={refetchFunc} pessoaNome={adminName ?? undefined} />}
-        {tab === "produtos" && <TabelaProdutos items={produtos} refetch={refetchProd} />}
+        {tab === "funcionarios" && <GridFuncionarios items={funcionarios} refetch={refetchFunc} setItems={setFuncionarios} pessoaNome={adminName ?? undefined} />}
+        {tab === "produtos" && <TabelaProdutos items={produtos} refetch={refetchProd} setItems={setProdutos} />}
         {tab === "sugestoes" && isAdmin && <TabelaSugestoes />}
       </div>
     </div>
@@ -164,7 +164,7 @@ type FuncData = {
 
 const EMPTY_FUNC: FuncData = { nome: "", iniciais: "", cor: "#64748b", ativo: true, email: "", departamento: "", funcao: "", acessos: [], pin: "" };
 
-function GridFuncionarios({ items, refetch, pessoaNome }: { items: Funcionario[]; refetch: () => void; pessoaNome?: string }) {
+function GridFuncionarios({ items, refetch, setItems, pessoaNome }: { items: Funcionario[]; refetch: () => void; setItems?: React.Dispatch<React.SetStateAction<Funcionario[]>>; pessoaNome?: string }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [data, setData] = useState<FuncData>(EMPTY_FUNC);
@@ -226,14 +226,19 @@ function GridFuncionarios({ items, refetch, pessoaNome }: { items: Funcionario[]
     };
     let savedId = editId;
     if (editId) {
+      // Optimistic
+      setItems?.((prev) => prev.map((f) => f.id === editId ? { ...f, ...(payload as Partial<Funcionario>) } : f));
       const { error } = await supabase.from("funcionarios").update(payload).eq("id", editId);
       setSaving(false);
       if (error) { toast.error(`Erro: ${error.message}`); return; }
+      notifyMutation("funcionarios");
     } else {
-      const { data: inserted, error } = await supabase.from("funcionarios").insert({ ...payload, ativo: true }).select("id").single();
+      const { data: inserted, error } = await supabase.from("funcionarios").insert({ ...payload, ativo: true }).select().single();
       setSaving(false);
       if (error) { toast.error(`Erro: ${error.message}`); return; }
       savedId = inserted?.id ?? null;
+      if (inserted) setItems?.((prev) => [...prev.filter((f) => f.id !== (inserted as Funcionario).id), inserted as Funcionario]);
+      notifyMutation("funcionarios");
     }
     supabase.from("audit_log").insert({
       pessoa_nome: pessoaNome ?? null,
@@ -245,13 +250,18 @@ function GridFuncionarios({ items, refetch, pessoaNome }: { items: Funcionario[]
     toast.success(editId ? "Guardado" : "Criado");
     close();
     refetch();
-  }, [editId, data, refetch, pessoaNome]);
+  }, [editId, data, refetch, pessoaNome, setItems]);
 
   const remove = useCallback(async () => {
     if (!editId) return;
     if (!confirm(`Apagar "${data.nome}"? Histórico mantém-se.`)) return;
+    // Optimistic
+    setItems?.((prev) => prev.filter((f) => f.id !== editId));
+    toast.success("Apagado");
+    close();
     const { error } = await supabase.from("funcionarios").delete().eq("id", editId);
     if (error) { toast.error("Erro ao apagar"); return; }
+    notifyMutation("funcionarios");
     supabase.from("audit_log").insert({
       pessoa_nome: pessoaNome ?? null,
       acao: "apagar_funcionario",
@@ -259,10 +269,8 @@ function GridFuncionarios({ items, refetch, pessoaNome }: { items: Funcionario[]
       alvo_id: editId,
       detalhes: { nome: data.nome },
     });
-    toast.success("Apagado");
-    close();
     refetch();
-  }, [editId, data.nome, refetch, pessoaNome]);
+  }, [editId, data.nome, refetch, pessoaNome, setItems]);
 
   const toggleAcesso = (key: string) => {
     setData((d) => ({ ...d, acessos: d.acessos.includes(key) ? d.acessos.filter((k) => k !== key) : [...d.acessos, key] }));
@@ -602,7 +610,7 @@ interface ImportRow {
   tipo: string;
 }
 
-function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => void }) {
+function TabelaProdutos({ items, refetch, setItems }: { items: Produto[]; refetch: () => void; setItems?: React.Dispatch<React.SetStateAction<Produto[]>> }) {
   const [editId, setEditId] = useState<string | null>(null);
   const [editData, setEditData] = useState({ referencia: "", descricao: "", tipo: "", tipo_caixa: "", qtd_por_caixa: "" });
   const [newRow, setNewRow] = useState(false);
@@ -639,39 +647,54 @@ function TabelaProdutos({ items, refetch }: { items: Produto[]; refetch: () => v
   const saveEdit = useCallback(async () => {
     if (!editId || !editData.referencia.trim()) return;
     setSaving(true);
-    const { error } = await supabase.from("produtos").update({
+    const patch = {
       referencia: editData.referencia.trim(),
       descricao: editData.descricao.trim(),
       tipo: editData.tipo.trim() || null,
       tipo_caixa: editData.tipo_caixa || null,
       qtd_por_caixa: editData.qtd_por_caixa === "" ? null : Number(editData.qtd_por_caixa),
-    }).eq("id", editId);
+    };
+    // Optimistic
+    setItems?.((prev) => prev.map((p) => p.id === editId ? { ...p, ...(patch as Partial<Produto>) } : p));
+    toast.success("Guardado");
+    setEditId(null);
+    const { error } = await supabase.from("produtos").update(patch).eq("id", editId);
     setSaving(false);
     if (error) toast.error("Erro ao guardar");
-    else { notifyMutation("produtos"); toast.success("Guardado"); setEditId(null); refetch(); }
-  }, [editId, editData, refetch]);
+    else notifyMutation("produtos");
+  }, [editId, editData, setItems]);
 
   const addNew = useCallback(async () => {
     if (!newData.referencia.trim()) return;
     setSaving(true);
-    const { error } = await supabase.from("produtos").insert({
+    const payload = {
       referencia: newData.referencia.trim(),
       descricao: newData.descricao.trim(),
       tipo: newData.tipo.trim() || null,
       tipo_caixa: newData.tipo_caixa || null,
       qtd_por_caixa: newData.qtd_por_caixa === "" ? null : Number(newData.qtd_por_caixa),
-    });
+    };
+    const { data, error } = await supabase.from("produtos").insert(payload).select().single();
     setSaving(false);
     if (error) toast.error("Erro ao criar");
-    else { notifyMutation("produtos"); toast.success("Produto criado"); setNewRow(false); setNewData({ referencia: "", descricao: "", tipo: "", tipo_caixa: "", qtd_por_caixa: "" }); refetch(); }
-  }, [newData, refetch]);
+    else {
+      if (data) setItems?.((prev) => [...prev.filter((p) => p.id !== (data as Produto).id), data as Produto]);
+      notifyMutation("produtos");
+      toast.success("Produto criado");
+      setNewRow(false);
+      setNewData({ referencia: "", descricao: "", tipo: "", tipo_caixa: "", qtd_por_caixa: "" });
+    }
+  }, [newData, setItems]);
 
   const remove = useCallback(async (id: string) => {
     if (!confirm("Apagar este produto?")) return;
+    // Optimistic
+    setItems?.((prev) => prev.filter((p) => p.id !== id));
+    toast.success("Apagado");
     const { error } = await supabase.from("produtos").delete().eq("id", id);
     if (error) toast.error("Erro ao apagar");
-    else { notifyMutation("produtos"); toast.success("Apagado"); refetch(); }
-  }, [refetch]);
+    else notifyMutation("produtos");
+  }, [setItems]);
 
   // ---- Excel Import ----
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {

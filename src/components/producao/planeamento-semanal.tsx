@@ -61,9 +61,12 @@ const ZONAS: Array<{ id: "sl1" | "sl2"; label: string; categoria: CategoriaMeta;
 interface Props {
   pedidos: PedidoProducao[];
   metas: MetaCategoria[];
+  setPedidos?: React.Dispatch<React.SetStateAction<PedidoProducao[]>>;
 }
 
-export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
+export function PlaneamentoSemanalTab({ pedidos, metas, setPedidos }: Props) {
+  const patchPedido = (id: string, patch: Partial<PedidoProducao>) =>
+    setPedidos?.((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   const [semanaOffset, setSemanaOffset] = useState(0);
   const metaPorZona = useMemo(() => {
     const r: Record<"sl1" | "sl2", number> = { sl1: 0, sl2: 0 };
@@ -229,6 +232,8 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
     const update: Record<string, unknown> = { data_agendada: novaData };
     if (novaData && p.estado === "pendente") update.estado = "programado";
     else if (!novaData && p.estado === "programado") update.estado = "pendente";
+    // Optimistic local patch — atualiza UI instantaneamente
+    patchPedido(p.id, update as Partial<PedidoProducao>);
     const { error } = await supabase.from("pedidos_producao").update(update).eq("id", p.id);
     if (error) toast.error("Erro: " + error.message);
     else notifyMutation("pedidos_producao");
@@ -286,16 +291,24 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
 
     if (atribuicoes.length === 0) { toast.info?.("Nada para sugerir"); return; }
 
-    let count = 0;
+    // Optimistic: aplica todas as atribuições localmente primeiro
     for (const a of atribuicoes) {
+      const novaData = days[a.diaIdx].toISOString();
+      const patch: Partial<PedidoProducao> = { data_agendada: novaData };
+      if (a.pedido.estado === "pendente") patch.estado = "programado";
+      patchPedido(a.pedido.id, patch);
+    }
+    toast.success(`${atribuicoes.length} pedidos agendados automaticamente`);
+
+    const results = await Promise.all(atribuicoes.map((a) => {
       const novaData = days[a.diaIdx].toISOString();
       const update: Record<string, unknown> = { data_agendada: novaData };
       if (a.pedido.estado === "pendente") update.estado = "programado";
-      const { error } = await supabase.from("pedidos_producao").update(update).eq("id", a.pedido.id);
-      if (!error) count++;
-    }
-    if (count > 0) notifyMutation("pedidos_producao");
-    toast.success(`${count} pedidos agendados automaticamente`);
+      return supabase.from("pedidos_producao").update(update).eq("id", a.pedido.id);
+    }));
+    const errors = results.filter((r) => r.error).length;
+    if (errors > 0) toast.error(`${errors} pedidos falharam a guardar`);
+    notifyMutation("pedidos_producao");
   }
 
   function abrirSubmeterSemana() {
@@ -325,13 +338,17 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
     }
 
     // Actualizar a flag precisa_rotulagem em todos os pedidos a submeter
+    // Optimistic: aplicar todas as mudanças localmente em batch
     for (const p of pedidosParaSubmeter) {
       const precisa = rotulagemIds.has(p.id);
       if (precisa !== p.precisa_rotulagem) {
-        await supabase.from("pedidos_producao").update({ precisa_rotulagem: precisa }).eq("id", p.id);
-        notifyMutation("pedidos_producao");
+        patchPedido(p.id, { precisa_rotulagem: precisa });
       }
     }
+    await Promise.all(pedidosParaSubmeter
+      .filter((p) => rotulagemIds.has(p.id) !== p.precisa_rotulagem)
+      .map((p) => supabase.from("pedidos_producao").update({ precisa_rotulagem: rotulagemIds.has(p.id) }).eq("id", p.id)));
+    notifyMutation("pedidos_producao");
 
     let opsCriadas = 0;
     let pedidosOk = 0;
@@ -401,16 +418,19 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
 
   async function confirmarAnularSubmissao() {
     const candidatos = confirmAnular ?? [];
-    let ok = 0;
-    for (const p of candidatos) {
-      const { error: eDel } = await supabase.from("ordens_producao").delete().eq("pedido_id", p.id);
-      if (eDel) { toast.error(`Erro a apagar OPs de ${p.produto_nome}`); continue; }
-      notifyMutation("ordens_producao");
-      const { error: eUpd } = await supabase.from("pedidos_producao").update({ estado: "programado" }).eq("id", p.id);
-      if (!eUpd) { ok++; notifyMutation("pedidos_producao"); }
-    }
-    toast.success(`${ok} pedidos anulados`);
+    // Optimistic: marca todos como programado imediatamente
+    for (const p of candidatos) patchPedido(p.id, { estado: "programado" });
+    toast.success(`${candidatos.length} pedidos anulados`);
     setConfirmAnular(null);
+    const ids = candidatos.map((p) => p.id);
+    const [delRes, updRes] = await Promise.all([
+      supabase.from("ordens_producao").delete().in("pedido_id", ids),
+      supabase.from("pedidos_producao").update({ estado: "programado" }).in("id", ids),
+    ]);
+    if (delRes.error) toast.error("Erro a apagar algumas OPs");
+    if (updRes.error) toast.error("Erro a actualizar alguns pedidos");
+    notifyMutation("ordens_producao");
+    notifyMutation("pedidos_producao");
   }
 
   function abrirLimparSemana() {
@@ -457,17 +477,23 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
     // Desagendar pedidos; os que têm OPs tocadas mantêm estado (continuam em produção)
     let desagendados = 0;
     let mantidos = 0;
+    // Optimistic: aplica patches localmente primeiro
     for (const p of todos) {
+      const temTocadas = (tocadasPorPedido.get(p.id) ?? 0) > 0;
+      const update: Partial<PedidoProducao> = { data_agendada: null, data_fim_agendada: null };
+      if (!temTocadas && p.estado === "programado") update.estado = "pendente";
+      patchPedido(p.id, update);
+      if (temTocadas) mantidos++;
+      else desagendados++;
+    }
+    const updates = await Promise.all(todos.map((p) => {
       const temTocadas = (tocadasPorPedido.get(p.id) ?? 0) > 0;
       const update: Record<string, unknown> = { data_agendada: null, data_fim_agendada: null };
       if (!temTocadas && p.estado === "programado") update.estado = "pendente";
-      if (temTocadas) mantidos++;
-      const { error } = await supabase.from("pedidos_producao").update(update).eq("id", p.id);
-      if (!error) {
-        notifyMutation("pedidos_producao");
-        if (!temTocadas) desagendados++;
-      }
-    }
+      return supabase.from("pedidos_producao").update(update).eq("id", p.id);
+    }));
+    if (updates.some((r) => r.error)) toast.error("Erro a desagendar alguns pedidos");
+    notifyMutation("pedidos_producao");
 
     const partes: string[] = [];
     if (desagendados > 0) partes.push(`${desagendados} desagendado${desagendados === 1 ? "" : "s"}`);
@@ -728,6 +754,7 @@ export function PlaneamentoSemanalTab({ pedidos, metas }: Props) {
           open
           editItem={viewPedido}
           onClose={() => setViewPedido(null)}
+          setPedidos={setPedidos}
         />
       )}
 

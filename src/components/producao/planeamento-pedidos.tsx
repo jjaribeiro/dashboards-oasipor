@@ -13,9 +13,23 @@ interface Props {
   pedidos: PedidoProducao[];
   ops: OrdemProducao[];
   zonas: ZonaProducao[];
+  setPedidos?: React.Dispatch<React.SetStateAction<PedidoProducao[]>>;
+  setOps?: React.Dispatch<React.SetStateAction<OrdemProducao[]>>;
 }
 
-export function PedidosTab({ pedidos, ops, zonas }: Props) {
+export function PedidosTab({ pedidos, ops, zonas, setPedidos, setOps }: Props) {
+  const patchPedido = (id: string, patch: Partial<PedidoProducao>) =>
+    setPedidos?.((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const removePedido = (id: string) =>
+    setPedidos?.((prev) => prev.filter((p) => p.id !== id));
+  const removePedidosBulk = (ids: string[]) => {
+    const set = new Set(ids);
+    setPedidos?.((prev) => prev.filter((p) => !set.has(p.id)));
+  };
+  const removeOpsByPedidos = (pedidoIds: string[]) => {
+    const set = new Set(pedidoIds);
+    setOps?.((prev) => prev.filter((o) => !o.pedido_id || !set.has(o.pedido_id)));
+  };
   const [search, setSearch] = useState("");
   const [estado, setEstado] = useState<string>("");
   const [editItem, setEditItem] = useState<PedidoProducao | null>(null);
@@ -51,8 +65,11 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
     const update: Record<string, unknown> = { data_agendada: novaData };
     if (novaData && pedido.estado === "pendente") update.estado = "programado";
     else if (!novaData && pedido.estado === "programado") update.estado = "pendente";
+    // Optimistic local patch
+    patchPedido(pedido.id, update as Partial<PedidoProducao>);
     const { error } = await supabase.from("pedidos_producao").update(update).eq("id", pedido.id);
     if (error) toast.error("Erro a guardar: " + error.message);
+    else notifyMutation("pedidos_producao");
   }
 
   async function aplicarBulk() {
@@ -61,29 +78,54 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
     const ids = [...selecionados];
     const alvos = pedidos.filter((p) => ids.includes(p.id));
     const novaData = new Date(bulkDate + "T12:00:00").toISOString();
-    let count = 0;
-    for (const p of alvos) {
-      const update: Record<string, unknown> = { data_agendada: novaData };
-      if (p.estado === "pendente") update.estado = "programado";
-      const { error } = await supabase.from("pedidos_producao").update(update).eq("id", p.id);
-      if (!error) count++;
+    // Optimistic local patch — show instantly
+    setPedidos?.((prev) => prev.map((p) => {
+      if (!ids.includes(p.id)) return p;
+      const patch: Partial<PedidoProducao> = { data_agendada: novaData };
+      if (p.estado === "pendente") patch.estado = "programado";
+      return { ...p, ...patch };
+    }));
+    toast.success(`${alvos.length} pedido${alvos.length === 1 ? "" : "s"} agendado${alvos.length === 1 ? "" : "s"} para ${new Date(bulkDate).toLocaleDateString("pt-PT")}`);
+    // Split pendentes vs já programados para um update em batch quando possível
+    const pendentes = alvos.filter((p) => p.estado === "pendente").map((p) => p.id);
+    const outros = alvos.filter((p) => p.estado !== "pendente").map((p) => p.id);
+    const tasks: Promise<{ error: Error | null }>[] = [];
+    if (pendentes.length > 0) {
+      tasks.push(supabase.from("pedidos_producao").update({ data_agendada: novaData, estado: "programado" }).in("id", pendentes) as unknown as Promise<{ error: Error | null }>);
     }
+    if (outros.length > 0) {
+      tasks.push(supabase.from("pedidos_producao").update({ data_agendada: novaData }).in("id", outros) as unknown as Promise<{ error: Error | null }>);
+    }
+    const results = await Promise.all(tasks);
+    const hasError = results.some((r) => r.error);
+    if (hasError) toast.error("Erro a guardar alguns pedidos");
     notifyMutation("pedidos_producao");
-    toast.success(`${count} pedido${count === 1 ? "" : "s"} agendado${count === 1 ? "" : "s"} para ${new Date(bulkDate).toLocaleDateString("pt-PT")}`);
   }
   async function limparBulk() {
     if (selecionados.size === 0) { toast.error("Selecciona pedidos primeiro"); return; }
     const ids = [...selecionados];
     const alvos = pedidos.filter((p) => ids.includes(p.id));
-    let count = 0;
-    for (const p of alvos) {
-      const update: Record<string, unknown> = { data_agendada: null };
-      if (p.estado === "programado") update.estado = "pendente";
-      const { error } = await supabase.from("pedidos_producao").update(update).eq("id", p.id);
-      if (!error) count++;
+    // Optimistic local patch
+    setPedidos?.((prev) => prev.map((p) => {
+      if (!ids.includes(p.id)) return p;
+      const patch: Partial<PedidoProducao> = { data_agendada: null };
+      if (p.estado === "programado") patch.estado = "pendente";
+      return { ...p, ...patch };
+    }));
+    toast.success(`${alvos.length} pedido${alvos.length === 1 ? "" : "s"} desagendado${alvos.length === 1 ? "" : "s"}`);
+    const programados = alvos.filter((p) => p.estado === "programado").map((p) => p.id);
+    const outros = alvos.filter((p) => p.estado !== "programado").map((p) => p.id);
+    const tasks: Promise<{ error: Error | null }>[] = [];
+    if (programados.length > 0) {
+      tasks.push(supabase.from("pedidos_producao").update({ data_agendada: null, estado: "pendente" }).in("id", programados) as unknown as Promise<{ error: Error | null }>);
     }
+    if (outros.length > 0) {
+      tasks.push(supabase.from("pedidos_producao").update({ data_agendada: null }).in("id", outros) as unknown as Promise<{ error: Error | null }>);
+    }
+    const results = await Promise.all(tasks);
+    const hasError = results.some((r) => r.error);
+    if (hasError) toast.error("Erro a guardar alguns pedidos");
     notifyMutation("pedidos_producao");
-    toast.success(`${count} pedido${count === 1 ? "" : "s"} desagendado${count === 1 ? "" : "s"}`);
   }
 
   // Prioridade efetiva em cascata por pedido (mesmo nº PP → prioridade desce por linha)
@@ -189,11 +231,15 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
             if (fetchErr) { toast.error("Erro: " + fetchErr.message); return; }
             const ids = (todos ?? []).map((r) => r.id as string);
             if (ids.length === 0) { toast.info?.("Sem pedidos para apagar"); return; }
+            // Optimistic: remove imediatamente da UI
+            removePedidosBulk(ids);
+            removeOpsByPedidos(ids);
+            toast.success(`${ids.length} pedidos apagados`);
             // Apagar OPs ligadas primeiro (para não haver FK set null em 500 linhas de uma vez)
             await supabase.from("ordens_producao").delete().in("pedido_id", ids);
             const { error } = await supabase.from("pedidos_producao").delete().in("id", ids);
             if (error) toast.error("Erro a apagar: " + error.message);
-            else { notifyMutation("pedidos_producao"); notifyMutation("ordens_producao"); toast.success(`${ids.length} pedidos apagados`); }
+            else { notifyMutation("pedidos_producao"); notifyMutation("ordens_producao"); }
           }}
           className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-extrabold text-red-700 shadow-sm hover:bg-red-100"
           title="Apagar todos os pedidos"
@@ -412,6 +458,7 @@ export function PedidosTab({ pedidos, ops, zonas }: Props) {
           onClose={() => setFormOpen(false)}
           editItem={editItem}
           comerciaisExistentes={comerciaisExistentes}
+          setPedidos={setPedidos}
         />
       )}
 
@@ -1040,7 +1087,7 @@ function ProgramarPedidoDialog({ pedido, zonas, opsExistentes, onClose }: {
   );
 }
 
-export function FormPedido({ open, onClose, editItem, readOnly = false, comerciaisExistentes = [] }: { open: boolean; onClose: () => void; editItem: PedidoProducao | null; readOnly?: boolean; comerciaisExistentes?: string[] }) {
+export function FormPedido({ open, onClose, editItem, readOnly = false, comerciaisExistentes = [], setPedidos }: { open: boolean; onClose: () => void; editItem: PedidoProducao | null; readOnly?: boolean; comerciaisExistentes?: string[]; setPedidos?: React.Dispatch<React.SetStateAction<PedidoProducao[]>> }) {
   const [numero, setNumero] = useState(editItem?.numero ?? "");
   const [produtoCodigo, setProdutoCodigo] = useState(editItem?.produto_codigo ?? "");
   const [produtoNome, setProdutoNome] = useState(editItem?.produto_nome ?? "");
@@ -1098,13 +1145,21 @@ export function FormPedido({ open, onClose, editItem, readOnly = false, comercia
       notas: notas || null,
     };
     if (editItem) {
+      // Optimistic patch
+      setPedidos?.((prev) => prev.map((p) => p.id === editItem.id ? { ...p, ...(payload as Partial<PedidoProducao>) } : p));
+      toast.success("Pedido actualizado");
       const { error } = await supabase.from("pedidos_producao").update(payload).eq("id", editItem.id);
       if (error) toast.error("Erro a guardar: " + error.message);
-      else { notifyMutation("pedidos_producao"); toast.success("Pedido actualizado"); }
+      else notifyMutation("pedidos_producao");
     } else {
-      const { error } = await supabase.from("pedidos_producao").insert(payload);
+      const { data, error } = await supabase.from("pedidos_producao").insert(payload).select().single();
       if (error) toast.error("Erro a criar: " + error.message);
-      else { notifyMutation("pedidos_producao"); toast.success("Pedido criado"); }
+      else {
+        // Optimistic: add returned row at top
+        if (data) setPedidos?.((prev) => [data as PedidoProducao, ...prev.filter((p) => p.id !== (data as PedidoProducao).id)]);
+        notifyMutation("pedidos_producao");
+        toast.success("Pedido criado");
+      }
     }
     setSaving(false);
     if (!editItem || (editItem)) onClose();
@@ -1119,20 +1174,26 @@ export function FormPedido({ open, onClose, editItem, readOnly = false, comercia
     };
     // Se ainda está pendente e o operador agendou, passa a programado
     if (inicioAgendado && editItem.estado === "pendente") update.estado = "programado";
+    // Optimistic
+    setPedidos?.((prev) => prev.map((p) => p.id === editItem.id ? { ...p, ...(update as Partial<PedidoProducao>) } : p));
+    toast.success("Agendamento actualizado");
+    onClose();
     const { error } = await supabase.from("pedidos_producao").update(update).eq("id", editItem.id);
     setSaving(false);
     if (error) { toast.error("Erro: " + error.message); return; }
     notifyMutation("pedidos_producao");
-    toast.success("Agendamento actualizado");
-    onClose();
   }
 
   async function handleDelete() {
     if (!editItem) return;
     if (!confirm(`Apagar pedido "${editItem.produto_nome}"? As OPs ligadas ficarão sem pedido.`)) return;
+    // Optimistic
+    setPedidos?.((prev) => prev.filter((p) => p.id !== editItem.id));
+    toast.success("Pedido apagado");
+    onClose();
     const { error } = await supabase.from("pedidos_producao").delete().eq("id", editItem.id);
     if (error) toast.error("Erro a apagar: " + error.message);
-    else { notifyMutation("pedidos_producao"); toast.success("Pedido apagado"); onClose(); }
+    else notifyMutation("pedidos_producao");
   }
 
   return (
