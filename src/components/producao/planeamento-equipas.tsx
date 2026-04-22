@@ -97,28 +97,48 @@ export function EquipasTab({ zonas, initialFuncionarios }: Props) {
       const dataStr = toYYYYMMDD(viewMonday);
       const exists = escala.some((e) => e.funcionario_id === funcId && e.zona_id === zonaId && e.data === dataStr);
       if (exists) return;
+      // Optimistic: insere com ID temporário (será substituído pelo real)
+      const tempId = `temp-${crypto.randomUUID()}`;
+      const tempRow: EscalaFuncionario = { id: tempId, funcionario_id: funcId, data: dataStr, zona_id: zonaId } as EscalaFuncionario;
+      setEscala((prev) => [...prev, tempRow]);
       const { data: inserted, error } = await supabase
         .from("escala_funcionario")
         .insert({ funcionario_id: funcId, data: dataStr, zona_id: zonaId })
         .select()
         .single();
-      if (error) { toast.error("Erro ao guardar escala"); return; }
+      if (error) {
+        setEscala((prev) => prev.filter((e) => e.id !== tempId));
+        toast.error("Erro ao guardar escala");
+        return;
+      }
       notifyMutation("escala_funcionario");
-      setEscala((prev) => [...prev, inserted as EscalaFuncionario]);
+      setEscala((prev) => prev.map((e) => e.id === tempId ? (inserted as EscalaFuncionario) : e));
     } else if (removeZonaId) {
       const dataStr = toYYYYMMDD(viewMonday);
       const row = escala.find((e) => e.funcionario_id === funcId && e.zona_id === removeZonaId && e.data === dataStr);
       if (!row) return;
-      await supabase.from("escala_funcionario").delete().eq("id", row.id);
-      notifyMutation("escala_funcionario");
+      // Optimistic
       setEscala((prev) => prev.filter((e) => e.id !== row.id));
+      const { error } = await supabase.from("escala_funcionario").delete().eq("id", row.id);
+      if (error) {
+        setEscala((prev) => [...prev, row]);
+        toast.error("Erro a apagar escala");
+        return;
+      }
+      notifyMutation("escala_funcionario");
     } else {
       // clear all for this func in this week
       const dataStr = toYYYYMMDD(viewMonday);
       const toDelete = escala.filter((e) => e.funcionario_id === funcId && e.data === dataStr);
-      await supabase.from("escala_funcionario").delete().in("id", toDelete.map((e) => e.id));
-      notifyMutation("escala_funcionario");
+      // Optimistic
       setEscala((prev) => prev.filter((e) => !(e.funcionario_id === funcId && e.data === dataStr)));
+      const { error } = await supabase.from("escala_funcionario").delete().in("id", toDelete.map((e) => e.id));
+      if (error) {
+        setEscala((prev) => [...prev, ...toDelete]);
+        toast.error("Erro a apagar escala");
+        return;
+      }
+      notifyMutation("escala_funcionario");
     }
   }
 

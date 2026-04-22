@@ -22,7 +22,9 @@ type EditableField =
   | "inicio_previsto"
   | "fim_previsto";
 
-export function OPsTab({ ops, pedidos, zonas }: { ops: OrdemProducao[]; pedidos: PedidoProducao[]; zonas: ZonaProducao[] }) {
+export function OPsTab({ ops, pedidos, zonas, setOps }: { ops: OrdemProducao[]; pedidos: PedidoProducao[]; zonas: ZonaProducao[]; setOps?: React.Dispatch<React.SetStateAction<OrdemProducao[]>> }) {
+  const patchOp = (id: string, patch: Partial<OrdemProducao>) =>
+    setOps?.((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
   const [search, setSearch] = useState("");
   const [estado, setEstado] = useState<string>("");
   const [zonaFiltro, setZonaFiltro] = useState<string>("");
@@ -77,6 +79,8 @@ export function OPsTab({ ops, pedidos, zonas }: { ops: OrdemProducao[]; pedidos:
       if ((valor ?? "") === ((atual as string | null) ?? "")) return;
     }
 
+    // Optimistic local patch — UI atualiza sem esperar pelo DB
+    patchOp(op.id, { [campo]: valor } as Partial<OrdemProducao>);
     const { error } = await supabase
       .from("ordens_producao")
       .update({ [campo]: valor })
