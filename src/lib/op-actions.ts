@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { notifyMutation } from "@/hooks/use-realtime-table";
 import type { OrdemProducao } from "@/lib/types";
 
 interface Actor {
@@ -37,6 +38,7 @@ async function gravarAudit(log: OpActionLog) {
 async function reverter(log: OpActionLog) {
   const { error } = await supabase.from("ordens_producao").update(log.antes).eq("id", log.op_id);
   if (error) { toast.error(`Erro a reverter: ${error.message}`); return false; }
+  notifyMutation("ordens_producao");
   await supabase.from("audit_log").insert({
     pessoa_id: log.actor.pessoaId ?? null,
     pessoa_nome: log.actor.pessoaNome ?? null,
@@ -64,6 +66,7 @@ export async function iniciarOP(op: OrdemProducao, actor: Actor = {}) {
   const depois: Snapshot = { estado: "em_curso", inicio: op.inicio ?? new Date().toISOString(), pausada_em: null };
   const { error } = await supabase.from("ordens_producao").update(depois).eq("id", op.id);
   if (error) { toast.error(`Erro: ${error.message}`); return; }
+  notifyMutation("ordens_producao");
   const log: OpActionLog = { acao: "iniciar_op", op_id: op.id, produto_nome: op.produto_nome, antes, depois, actor, created_at: Date.now() };
   await gravarAudit(log);
   toastComDesfazer("OP iniciada", log);
@@ -75,6 +78,7 @@ export async function pausarOP(op: OrdemProducao, motivo: string | null, actor: 
   const depois: Snapshot = { estado: "pausada", pausada_em: new Date().toISOString(), motivo_pausa: motivo };
   const { error } = await supabase.from("ordens_producao").update(depois).eq("id", op.id);
   if (error) { toast.error(`Erro: ${error.message}`); return; }
+  notifyMutation("ordens_producao");
   const log: OpActionLog = { acao: "pausar_op", op_id: op.id, produto_nome: op.produto_nome, antes, depois, actor, created_at: Date.now() };
   await gravarAudit(log);
   toastComDesfazer("OP pausada", log);
@@ -86,6 +90,7 @@ export async function concluirOP(op: OrdemProducao, actor: Actor = {}) {
   const depois: Snapshot = { estado: "concluida", fim_real: new Date().toISOString() };
   const { error } = await supabase.from("ordens_producao").update(depois).eq("id", op.id);
   if (error) { toast.error(`Erro: ${error.message}`); return; }
+  notifyMutation("ordens_producao");
   const log: OpActionLog = { acao: "concluir_op", op_id: op.id, produto_nome: op.produto_nome, antes, depois, actor, created_at: Date.now() };
   await gravarAudit(log);
   toastComDesfazer("OP concluída — pode reverter durante 8s", log);
@@ -108,6 +113,7 @@ export async function reverterUltimaNaZona(zonaId: string): Promise<boolean> {
   if (!detalhes?.antes || !log.alvo_id) { toast.error("Registo sem estado anterior"); return false; }
   const { error: eUpd } = await supabase.from("ordens_producao").update(detalhes.antes).eq("id", log.alvo_id);
   if (eUpd) { toast.error(`Erro a reverter: ${eUpd.message}`); return false; }
+  notifyMutation("ordens_producao");
   await supabase.from("audit_log").insert({
     acao: `reverter_${log.acao}`,
     alvo_tabela: "ordens_producao",

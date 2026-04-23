@@ -83,13 +83,19 @@ export function usePessoaSession() {
   }, []);
 
   const logout = useCallback(() => {
-    saveSession(null);
+    logoutAll();
     setSession(null);
-    // Limpar também sessões de zona
-    sessionStorage.removeItem(ZONA_STORAGE_KEY);
   }, []);
 
   return { session, loaded, login, logout };
+}
+
+/** Limpa TODAS as sessões armazenadas (pessoa + zona + funcionário). */
+export function logoutAll() {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(STORAGE_KEY);
+  sessionStorage.removeItem(ZONA_STORAGE_KEY);
+  sessionStorage.removeItem(FUNC_STORAGE_KEY);
 }
 
 export function useZonaSession(zonaId: string) {
@@ -200,7 +206,7 @@ export function useFuncionarioSession() {
   }, []);
 
   const logout = useCallback(() => {
-    saveFuncionarioSession(null);
+    logoutAll();
     setSession(null);
   }, []);
 
