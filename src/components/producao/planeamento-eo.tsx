@@ -150,26 +150,70 @@ export function PlaneamentoEOTab({ ops, setOps, initialPaletes, initialProdutos 
     if (!palete || !opRow) return;
     const info = disponiveis.find((d) => d.op.id === opId);
     const produtoTipoCaixa = info?.tipoCaixa ?? null;
+    const totalCaixas = info?.numCaixas ?? 0;
+    const qtdPorCaixa = info?.qtdCaixa ?? 0;
+    const remaining = Math.max(0, totalCaixas - numCaixas);
 
     // Guardar estado anterior para rollback em caso de erro
     const prevPaleteId = opRow.palete_eo_id;
     const prevNumCaixas = opRow.num_caixas;
+    const prevQuantidadeAtual = opRow.quantidade_atual;
 
     // Optimistic: update local state immediately
-    patchOp(opId, { palete_eo_id: paleteId, num_caixas: numCaixas });
-    toast.success(`OP movida para palete ${palete.numero} (${numCaixas}cx)`);
+    const partialQtd = qtdPorCaixa > 0 ? numCaixas * qtdPorCaixa : opRow.quantidade_atual;
+    patchOp(opId, { palete_eo_id: paleteId, num_caixas: numCaixas, quantidade_atual: partialQtd });
+    toast.success(`OP alocada à palete ${palete.numero} (${numCaixas}cx)` + (remaining > 0 ? ` — ${remaining}cx ficam na fila` : ""));
 
+    // 1. Actualizar OP original para as caixas alocadas a esta palete
     const { error: eOp } = await supabase.from("ordens_producao").update({
       palete_eo_id: paleteId,
       num_caixas: numCaixas,
+      quantidade_atual: partialQtd,
     }).eq("id", opId);
     if (eOp) {
       // Rollback
-      patchOp(opId, { palete_eo_id: prevPaleteId, num_caixas: prevNumCaixas });
+      patchOp(opId, { palete_eo_id: prevPaleteId, num_caixas: prevNumCaixas, quantidade_atual: prevQuantidadeAtual });
       toast.error("Erro a atribuir OP — revertido");
       return;
     }
     notifyMutation("ordens_producao");
+
+    // 2. Se há caixas restantes → duplicar OP (mesma tudo, menos palete) para ficar em disponíveis
+    if (remaining > 0) {
+      const remainingQtd = qtdPorCaixa > 0 ? remaining * qtdPorCaixa : 0;
+      const clone: Partial<OrdemProducao> = {
+        numero: opRow.numero,
+        zona_id: opRow.zona_id,
+        produto_id: opRow.produto_id,
+        produto_nome: opRow.produto_nome,
+        produto_codigo: opRow.produto_codigo,
+        cliente: opRow.cliente,
+        categoria: opRow.categoria,
+        tipo_linha: opRow.tipo_linha,
+        prioridade: opRow.prioridade,
+        estado: opRow.estado,
+        quantidade_alvo: remaining * (qtdPorCaixa || 1),
+        quantidade_atual: remainingQtd,
+        quantidade_rejeitada: 0,
+        lote: opRow.lote,
+        pedido_id: opRow.pedido_id,
+        responsavel: opRow.responsavel,
+        notas: opRow.notas ? `${opRow.notas} (split de ${prevNumCaixas ?? totalCaixas}cx)` : `split de ${prevNumCaixas ?? totalCaixas}cx`,
+        palete_eo_id: null,
+        num_caixas: remaining,
+        bloqueada: opRow.bloqueada ?? false,
+        fase_atual: opRow.fase_atual,
+      };
+      const { error: eIns } = await supabase.from("ordens_producao").insert(clone);
+      if (eIns) {
+        toast.error(`Erro a criar OP com ${remaining}cx restantes — revertido`);
+        // Rollback: devolver OP original ao estado anterior
+        patchOp(opId, { palete_eo_id: prevPaleteId, num_caixas: prevNumCaixas, quantidade_atual: prevQuantidadeAtual });
+        await supabase.from("ordens_producao").update({ palete_eo_id: prevPaleteId, num_caixas: prevNumCaixas, quantidade_atual: prevQuantidadeAtual }).eq("id", opId);
+        return;
+      }
+      notifyMutation("ordens_producao");
+    }
 
     if (!palete.tipo_caixa && produtoTipoCaixa) {
       await supabase.from("paletes_eo").update({ tipo_caixa: produtoTipoCaixa }).eq("id", paleteId);
