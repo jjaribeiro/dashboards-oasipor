@@ -51,6 +51,7 @@ export function FuncionarioAuthGate({ children, requiredAccess, title, subtitle 
   };
 
   if (!session || !hasAccess) {
+    const loggedInButNoAccess = !!session && !hasAccess;
     return (
       <div className="flex h-dvh flex-col items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
         <div className="absolute left-4 top-4">
@@ -77,6 +78,13 @@ export function FuncionarioAuthGate({ children, requiredAccess, title, subtitle 
               {subtitle ?? "Introduz o teu PIN para entrar"}
             </p>
           </div>
+
+          {loggedInButNoAccess && session && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-center text-xs font-bold text-amber-800">
+              <p>Olá <span className="font-black">{session.nome}</span> — não tens acesso a <span className="font-black">{title}</span>.</p>
+              <p className="mt-1 font-normal">Entra com outro PIN ou volta ao menu.</p>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

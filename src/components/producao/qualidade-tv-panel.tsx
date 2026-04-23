@@ -267,6 +267,7 @@ function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorD
   }, [needsCarousel, totalPages]);
 
   const pageRows = flat.slice(page * ROTULAGEM_PER_PAGE, (page + 1) * ROTULAGEM_PER_PAGE);
+  const pageLen = pageRows.length;
 
   if (flat.length === 0) {
     return <div className="flex-1 p-2"><p className="py-12 text-center text-sm font-bold text-slate-400">Nada planeado 🎉</p></div>;
@@ -308,6 +309,9 @@ function PlaneadoCarousel({ days, planeadoPorDia }: { days: Date[]; planeadoPorD
             </li>
           );
         })}
+        {Array.from({ length: Math.max(0, ROTULAGEM_PER_PAGE - pageLen) }).map((_, i) => (
+          <li key={`placeholder-${i}`} aria-hidden="true" className="min-h-0" />
+        ))}
       </ul>
     </div>
   );
@@ -331,6 +335,7 @@ function RotulagemCarousel({ ops, pedidoPorId }: { ops: OrdemProducao[]; pedidoP
   }
 
   const pageOps = ops.slice(page * ROTULAGEM_PER_PAGE, (page + 1) * ROTULAGEM_PER_PAGE);
+  const pageLen = pageOps.length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -379,6 +384,9 @@ function RotulagemCarousel({ ops, pedidoPorId }: { ops: OrdemProducao[]; pedidoP
             </li>
           );
         })}
+        {Array.from({ length: Math.max(0, ROTULAGEM_PER_PAGE - pageLen) }).map((_, i) => (
+          <li key={`placeholder-${i}`} aria-hidden="true" className="min-h-0" />
+        ))}
       </ul>
     </div>
   );
@@ -415,6 +423,7 @@ function CqManutencaoCarousel({ cqSolicitado, manutencaoPedidos, pedidoPorId, on
   }
 
   const pageItems = flat.slice(page * ROTULAGEM_PER_PAGE, (page + 1) * ROTULAGEM_PER_PAGE);
+  const pageLen = pageItems.length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -476,40 +485,8 @@ function CqManutencaoCarousel({ cqSolicitado, manutencaoPedidos, pedidoPorId, on
             </li>
           );
         })}
-      </ul>
-    </div>
-  );
-}
-
-function HistoricoRotulagem({ lista }: { lista: RotulagemInspecao[] }) {
-  const feitas = lista.filter((i) => i.resultado !== "pendente").slice(0, 5);
-  if (feitas.length === 0) return null;
-  return (
-    <div className="border-t border-slate-200 bg-slate-50 px-3 py-2">
-      <p className="mb-1 text-xs font-extrabold uppercase tracking-wide text-slate-500">Últimas inspeções</p>
-      <ul className="space-y-0.5">
-        {feitas.map((i) => (
-          <li key={i.id} className="flex items-center justify-between gap-2 text-xs">
-            <span className="truncate font-bold text-slate-600">{i.lote ?? "—"} · {i.pessoa_nome ?? "—"}</span>
-            <span className={cn("shrink-0 rounded px-1.5 py-0.5 font-extrabold", corRotulagem(i.resultado))}>{labelRotulagem(i.resultado)}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function NcsAbertas({ lista }: { lista: NaoConformidade[] }) {
-  if (lista.length === 0) return null;
-  return (
-    <div className="border-t border-slate-200 bg-red-50/50 px-3 py-2">
-      <p className="mb-1 text-xs font-extrabold uppercase tracking-wide text-red-700">Não-conformidades abertas</p>
-      <ul className="space-y-0.5">
-        {lista.slice(0, 4).map((n) => (
-          <li key={n.id} className="flex items-center justify-between gap-2 text-xs">
-            <span className="truncate font-bold text-slate-700" title={n.descricao}>{n.numero ?? "NC"} · {n.descricao.slice(0, 40)}{n.descricao.length > 40 ? "…" : ""}</span>
-            <span className={cn("shrink-0 rounded px-1.5 py-0.5 font-extrabold", corSeveridade(n.severidade))}>{n.severidade}</span>
-          </li>
+        {Array.from({ length: Math.max(0, ROTULAGEM_PER_PAGE - pageLen) }).map((_, i) => (
+          <li key={`placeholder-${i}`} aria-hidden="true" className="min-h-0" />
         ))}
       </ul>
     </div>
@@ -521,9 +498,6 @@ function labelRotulagem(r: ResultadoRotulagem) {
 }
 function corRotulagem(r: ResultadoRotulagem) {
   return { aprovado: "bg-emerald-100 text-emerald-700", reetiquetar: "bg-amber-100 text-amber-700", descartar: "bg-red-100 text-red-700", pendente: "bg-slate-100 text-slate-700" }[r];
-}
-function corSeveridade(s: string) {
-  return ({ baixa: "bg-slate-100 text-slate-700", media: "bg-amber-100 text-amber-700", alta: "bg-orange-100 text-orange-700", critica: "bg-red-100 text-red-700" } as Record<string, string>)[s] ?? "bg-slate-100 text-slate-700";
 }
 
 /* ===== Form Rotulagem (compacto) ===== */

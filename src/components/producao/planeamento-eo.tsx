@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
 import { useRealtimeTable, notifyMutation } from "@/hooks/use-realtime-table";
@@ -92,20 +92,23 @@ export function PlaneamentoEOTab({ ops, setOps, initialPaletes, initialProdutos 
     return m;
   }, [ops, produtoPorId, produtoPorCodigo]);
 
-  // Garantir 8 paletes em estado planeamento
+  // Garantir 8 paletes em estado planeamento — guard contra race condition
+  const seedingRef = useRef(false);
   useEffect(() => {
+    if (seedingRef.current) return;
     const emPlaneamento = paletes.filter((p) => p.estado === "planeamento");
-    if (emPlaneamento.length < NUM_PALETES) {
-      const existentesNums = new Set(emPlaneamento.map((p) => p.numero));
-      const faltam: { numero: number }[] = [];
-      for (let i = 1; i <= NUM_PALETES; i++) if (!existentesNums.has(i)) faltam.push({ numero: i });
-      if (faltam.length > 0) {
-        supabase.from("paletes_eo").insert(faltam.map((f) => ({ numero: f.numero, estado: "planeamento" }))).then(({ error }) => {
-          if (error) console.error("seed paletes", error);
-          else { notifyMutation("paletes_eo"); refetchPaletes(); }
-        });
-      }
-    }
+    if (emPlaneamento.length >= NUM_PALETES) return;
+    const existentesNums = new Set(emPlaneamento.map((p) => p.numero));
+    const faltam: { numero: number }[] = [];
+    for (let i = 1; i <= NUM_PALETES; i++) if (!existentesNums.has(i)) faltam.push({ numero: i });
+    if (faltam.length === 0) return;
+    seedingRef.current = true;
+    supabase.from("paletes_eo").insert(faltam.map((f) => ({ numero: f.numero, estado: "planeamento" }))).then(({ error }) => {
+      if (error) console.error("seed paletes", error);
+      else { notifyMutation("paletes_eo"); refetchPaletes(); }
+      // Liberta o guard depois de um pequeno delay para que o realtime chegue primeiro
+      setTimeout(() => { seedingRef.current = false; }, 2000);
+    });
   }, [paletes, refetchPaletes]);
 
   const paletesPlaneamento = useMemo(() => {
@@ -143,9 +146,14 @@ export function PlaneamentoEOTab({ ops, setOps, initialPaletes, initialProdutos 
 
   const confirmAssign = useCallback(async (opId: string, paleteId: string, numCaixas: number) => {
     const palete = paletes.find((p) => p.id === paleteId);
-    if (!palete) return;
+    const opRow = ops.find((o) => o.id === opId);
+    if (!palete || !opRow) return;
     const info = disponiveis.find((d) => d.op.id === opId);
     const produtoTipoCaixa = info?.tipoCaixa ?? null;
+
+    // Guardar estado anterior para rollback em caso de erro
+    const prevPaleteId = opRow.palete_eo_id;
+    const prevNumCaixas = opRow.num_caixas;
 
     // Optimistic: update local state immediately
     patchOp(opId, { palete_eo_id: paleteId, num_caixas: numCaixas });
@@ -155,14 +163,19 @@ export function PlaneamentoEOTab({ ops, setOps, initialPaletes, initialProdutos 
       palete_eo_id: paleteId,
       num_caixas: numCaixas,
     }).eq("id", opId);
-    if (eOp) { toast.error("Erro a atribuir OP"); return; }
+    if (eOp) {
+      // Rollback
+      patchOp(opId, { palete_eo_id: prevPaleteId, num_caixas: prevNumCaixas });
+      toast.error("Erro a atribuir OP — revertido");
+      return;
+    }
     notifyMutation("ordens_producao");
 
     if (!palete.tipo_caixa && produtoTipoCaixa) {
       await supabase.from("paletes_eo").update({ tipo_caixa: produtoTipoCaixa }).eq("id", paleteId);
       notifyMutation("paletes_eo");
     }
-  }, [paletes, disponiveis, patchOp]);
+  }, [ops, paletes, disponiveis, patchOp]);
 
   const assignOpToPalete = useCallback(async (opId: string, paleteId: string) => {
     const opRow = ops.find((o) => o.id === opId);
@@ -204,26 +217,38 @@ export function PlaneamentoEOTab({ ops, setOps, initialPaletes, initialProdutos 
   }, [ops, paletes, opsPorPalete, disponiveis, confirmAssign]);
 
   const removerDaPalete = useCallback(async (opId: string) => {
+    const opRow = ops.find((o) => o.id === opId);
+    const prevPaleteId = opRow?.palete_eo_id ?? null;
     patchOp(opId, { palete_eo_id: null });
     toast.success("Removido da palete");
     const { error } = await supabase.from("ordens_producao").update({ palete_eo_id: null }).eq("id", opId);
-    if (error) toast.error("Erro a remover");
-    else notifyMutation("ordens_producao");
-  }, [patchOp]);
+    if (error) {
+      patchOp(opId, { palete_eo_id: prevPaleteId });
+      toast.error("Erro a remover — revertido");
+    } else notifyMutation("ordens_producao");
+  }, [ops, patchOp]);
 
   const limparPalete = useCallback(async (paleteId: string) => {
     const items = opsPorPalete.get(paleteId) ?? [];
     if (items.length === 0) return;
     if (!confirm(`Remover ${items.length} OP${items.length === 1 ? "" : "s"} da palete?`)) return;
+    // Guardar estado prévio para rollback
+    const prev = items.map((it) => ({ id: it.op.id, palete_eo_id: it.op.palete_eo_id }));
     // Optimistic: atualizar local imediatamente
     const ids = items.map((it) => it.op.id);
     for (const id of ids) patchOp(id, { palete_eo_id: null });
     toast.success("Palete limpa");
     // Escrita em paralelo num único query
-    await Promise.all([
+    const [{ error: eOps }, { error: eP }] = await Promise.all([
       supabase.from("ordens_producao").update({ palete_eo_id: null }).in("id", ids),
       supabase.from("paletes_eo").update({ tipo_caixa: null }).eq("id", paleteId),
     ]);
+    if (eOps || eP) {
+      // Rollback optimistic
+      for (const p of prev) patchOp(p.id, { palete_eo_id: p.palete_eo_id });
+      toast.error("Erro a limpar — revertido");
+      return;
+    }
     notifyMutation("ordens_producao");
     notifyMutation("paletes_eo");
   }, [opsPorPalete, patchOp]);
